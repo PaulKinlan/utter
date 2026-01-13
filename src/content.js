@@ -4,11 +4,30 @@
 (async function () {
   const INDICATOR_ID = 'utter-listening-indicator';
 
+  // Check if extension context is still valid
+  function isContextValid() {
+    try {
+      return chrome.runtime?.id != null;
+    } catch {
+      return false;
+    }
+  }
+
+  // Check context validity upfront
+  if (!isContextValid()) {
+    showIndicator('Extension updated - reload page', true);
+    return;
+  }
+
   // Check if we already have an active session - toggle off
   if (window.__utterActive) {
     console.log('Utter: Stopping recognition (toggle off)');
     window.__utterActive = false;
-    chrome.runtime.sendMessage({ type: 'stop-recognition-request' });
+    try {
+      chrome.runtime.sendMessage({ type: 'stop-recognition-request' });
+    } catch {
+      // Context invalidated
+    }
     removeIndicator();
     return;
   }
@@ -36,6 +55,7 @@
   // Set up message listener for recognition events
   if (!window.__utterMessageListener) {
     window.__utterMessageListener = (message) => {
+      if (!isContextValid()) return;
       handleRecognitionMessage(message);
     };
     chrome.runtime.onMessage.addListener(window.__utterMessageListener);
@@ -45,7 +65,12 @@
   showIndicator('Starting...');
 
   // Request recognition start from background
-  chrome.runtime.sendMessage({ type: 'start-recognition-request' });
+  try {
+    chrome.runtime.sendMessage({ type: 'start-recognition-request' });
+  } catch (err) {
+    showIndicator('Extension updated - reload page', true);
+    return;
+  }
 
   function handleRecognitionMessage(message) {
     console.log('Utter Content: Received message:', message);
@@ -172,6 +197,7 @@
   }
 
   async function saveToHistory(text) {
+    if (!isContextValid()) return;
     try {
       const result = await chrome.storage.local.get(['utterHistory']);
       const history = result.utterHistory || [];
@@ -188,6 +214,9 @@
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
       console.log('Utter: Saved to history');
     } catch (err) {
+      if (err.message?.includes('Extension context invalidated')) {
+        return;
+      }
       console.error('Utter: Error saving to history:', err);
     }
   }

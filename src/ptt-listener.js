@@ -11,10 +11,21 @@
   };
 
   let isKeyHeld = false;
+  let contextInvalidated = false;
+
+  // Check if extension context is still valid
+  function isContextValid() {
+    try {
+      return !contextInvalidated && chrome.runtime?.id != null;
+    } catch {
+      return false;
+    }
+  }
 
   // Load settings initially and listen for changes
   loadSettings();
   chrome.storage.onChanged.addListener((changes) => {
+    if (!isContextValid()) return;
     if (changes.activationMode) {
       settings.activationMode = changes.activationMode.newValue;
     }
@@ -24,17 +35,23 @@
   });
 
   async function loadSettings() {
+    if (!isContextValid()) return;
     try {
       const result = await chrome.storage.local.get(['activationMode', 'pttKeyCombo']);
       settings.activationMode = result.activationMode || 'toggle';
       settings.pttKeyCombo = result.pttKeyCombo || null;
     } catch (err) {
+      if (err.message?.includes('Extension context invalidated')) {
+        contextInvalidated = true;
+        return;
+      }
       console.error('Utter PTT: Error loading settings:', err);
     }
   }
 
   // Set up message listener for recognition events
   chrome.runtime.onMessage.addListener((message) => {
+    if (!isContextValid()) return;
     handleRecognitionMessage(message);
   });
 
@@ -76,6 +93,7 @@
 
   // Listen for keydown
   document.addEventListener('keydown', async (e) => {
+    if (!isContextValid()) return;
     if (settings.activationMode !== 'push-to-talk') return;
     if (!settings.pttKeyCombo) return;
     if (!matchesCombo(e, settings.pttKeyCombo)) return;
@@ -92,6 +110,7 @@
 
   // Listen for keyup
   document.addEventListener('keyup', (e) => {
+    if (!isContextValid()) return;
     if (settings.activationMode !== 'push-to-talk') return;
     if (!settings.pttKeyCombo) return;
     if (!isKeyHeld) return;
@@ -123,6 +142,12 @@
   }
 
   async function startRecognition() {
+    if (!isContextValid()) {
+      showIndicator('Extension updated - reload page', true);
+      isKeyHeld = false;
+      return;
+    }
+
     const targetElement = document.activeElement;
 
     const isTextInput =
@@ -139,11 +164,23 @@
     window.__utterTargetElement = targetElement;
     showIndicator('Starting...');
 
-    chrome.runtime.sendMessage({ type: 'start-recognition-request' });
+    try {
+      chrome.runtime.sendMessage({ type: 'start-recognition-request' });
+    } catch (err) {
+      if (err.message?.includes('Extension context invalidated')) {
+        contextInvalidated = true;
+        showIndicator('Extension updated - reload page', true);
+      }
+    }
   }
 
   function stopRecognition() {
-    chrome.runtime.sendMessage({ type: 'stop-recognition-request' });
+    if (!isContextValid()) return;
+    try {
+      chrome.runtime.sendMessage({ type: 'stop-recognition-request' });
+    } catch {
+      // Context invalidated, ignore
+    }
   }
 
   function isTextInputType(type) {
@@ -226,6 +263,7 @@
   }
 
   async function saveToHistory(text) {
+    if (!isContextValid()) return;
     try {
       const result = await chrome.storage.local.get(['utterHistory']);
       const history = result.utterHistory || [];
@@ -242,6 +280,10 @@
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
       console.log('Utter PTT: Saved to history');
     } catch (err) {
+      if (err.message?.includes('Extension context invalidated')) {
+        contextInvalidated = true;
+        return;
+      }
       console.error('Utter PTT: Error saving to history:', err);
     }
   }
