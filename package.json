@@ -10,7 +10,7 @@
     "generate-icons": "node scripts/generate-icons.js"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.25.0",
     "eslint": "^9.0.0"
   }
 }
