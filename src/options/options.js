@@ -1,6 +1,7 @@
 // Options page script
 
 const microphoneSelect = document.getElementById('microphone-select');
+const microphoneField = document.getElementById('microphone-field');
 const requestPermissionBtn = document.getElementById('request-permission');
 const permissionStatus = document.getElementById('permission-status');
 const saveStatus = document.getElementById('save-status');
@@ -41,6 +42,32 @@ async function init() {
 
 async function loadDevices() {
   try {
+    // First check if we have permission using the Permissions API
+    let hasPermission = false;
+    try {
+      const permissionResult = await navigator.permissions.query({ name: 'microphone' });
+      hasPermission = permissionResult.state === 'granted';
+    } catch {
+      // Permissions API not supported, fall back to checking device labels
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(d => d.kind === 'audioinput');
+      hasPermission = audioInputs.some(d => d.label);
+    }
+
+    if (!hasPermission) {
+      // Permission not granted - hide dropdown and show request button
+      microphoneField.classList.add('hidden');
+      requestPermissionBtn.classList.remove('hidden');
+      showPermissionStatus('Microphone permission is required to select an audio input device.', 'error');
+      return;
+    }
+
+    // Permission granted - show dropdown and hide request button
+    microphoneField.classList.remove('hidden');
+    requestPermissionBtn.classList.add('hidden');
+    permissionStatus.textContent = '';
+    permissionStatus.className = 'status';
+
     const devices = await navigator.mediaDevices.enumerateDevices();
     const audioInputs = devices.filter(d => d.kind === 'audioinput');
 
@@ -56,18 +83,8 @@ async function loadDevices() {
     microphoneSelect.appendChild(defaultOption);
 
     if (audioInputs.length === 0) {
-      showPermissionStatus('No microphones found. Click "Request Microphone Permission" to grant access.', 'error');
+      showPermissionStatus('No microphones found.', 'error');
       return;
-    }
-
-    // Check if we have labels (indicates permission was granted)
-    const hasLabels = audioInputs.some(d => d.label);
-
-    if (!hasLabels) {
-      showPermissionStatus('Grant microphone permission to see device names.', 'error');
-    } else {
-      permissionStatus.textContent = '';
-      permissionStatus.className = 'status';
     }
 
     audioInputs.forEach((device, index) => {
@@ -119,12 +136,17 @@ requestPermissionBtn.addEventListener('click', async () => {
     // Stop the stream immediately - we just needed permission
     stream.getTracks().forEach(track => track.stop());
 
-    showPermissionStatus('Permission granted!', 'success');
+    // Reload devices - this will show the dropdown and hide the button
     await loadDevices();
     await loadSavedSettings();
+    showPermissionStatus('Permission granted! You can now select a microphone.', 'success');
   } catch (err) {
     console.error('Permission error:', err);
-    showPermissionStatus('Permission denied: ' + err.message, 'error');
+    if (err.name === 'NotAllowedError') {
+      showPermissionStatus('Permission denied. Please allow microphone access in your browser settings.', 'error');
+    } else {
+      showPermissionStatus('Error: ' + err.message, 'error');
+    }
   }
 });
 

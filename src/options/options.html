@@ -14,14 +14,14 @@
       <h2>Microphone</h2>
       <p class="description">Select which microphone to use for speech recognition.</p>
 
-      <div class="field">
+      <div class="field hidden" id="microphone-field">
         <label for="microphone-select">Audio Input Device</label>
         <select id="microphone-select">
           <option value="">Loading devices...</option>
         </select>
       </div>
 
-      <button id="request-permission" class="secondary">Request Microphone Permission</button>
+      <button id="request-permission" class="secondary">Grant Microphone Permission</button>
       <p id="permission-status" class="status"></p>
     </section>
 
