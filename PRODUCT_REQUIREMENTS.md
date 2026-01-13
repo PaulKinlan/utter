@@ -14,17 +14,103 @@ Utter is a Chrome extension that provides a global hotkey to invoke the Web Spee
 
 **User Flow:**
 1. User focuses on any text input field on a webpage
-2. User presses the global hotkey (Ctrl+Shift+S / Cmd+Shift+S)
+2. User presses the global hotkey (Ctrl+Shift+U / Cmd+Shift+U)
 3. Speech recognition activates and begins listening
 4. Transcribed text appears in real-time in the focused text field
-5. Recognition stops when user stops speaking or presses the hotkey again
+5. Recognition stops when user presses the hotkey again
 
 **Technical Requirements:**
 - Use the Web Speech Recognition API (`webkitSpeechRecognition`)
 - Register global hotkey via `chrome.commands` API
 - Inject transcribed text into the active text input element
 - Show visual indicator when listening is active
+- Auto-restart recognition on no-speech timeout
 
 **Permissions Needed:**
 - `activeTab` - to inject content script and access focused element
 - `scripting` - to execute scripts in the active tab
+- `storage` - to persist user preferences
+
+---
+
+### v1.1 - Microphone Selection
+
+**Description:** Allow users to select which microphone to use for speech recognition via an options page.
+
+**User Flow:**
+1. User right-clicks extension icon → Options (or goes to chrome://extensions → Utter → Details → Extension options)
+2. Options page shows list of available audio input devices
+3. User grants microphone permission if needed
+4. User selects preferred microphone from dropdown
+5. Selection is saved and used for subsequent speech recognition sessions
+
+**Technical Requirements:**
+- Options page using `options_ui` in manifest
+- Enumerate devices via `navigator.mediaDevices.enumerateDevices()`
+- Save preference to `chrome.storage.local`
+- Prime selected microphone via `getUserMedia()` before starting recognition
+- Handle permission flow gracefully
+
+---
+
+### v1.2 - Push-to-Talk Mode
+
+**Description:** Alternative activation mode where users hold a custom key combination to talk, releasing to stop. More natural for quick voice inputs.
+
+**User Flow:**
+1. User opens Options and selects "Push-to-talk mode"
+2. User clicks "Record" and presses their desired key combination (e.g., Ctrl+Space)
+3. Key combo is saved
+4. On any webpage, user holds the key combo to start voice input
+5. User speaks while holding the keys
+6. Releasing any key in the combo stops recognition
+
+**Technical Requirements:**
+- Activation mode selector in options (Toggle vs Push-to-Talk)
+- Key combo recorder that captures modifiers + key
+- Persistent content script (`content_scripts` in manifest) running on all pages
+- Listen for `keydown` to start recognition when combo matches
+- Listen for `keyup` to stop recognition when any combo key is released
+- Store settings in `chrome.storage.local`
+- Sync settings changes via `chrome.storage.onChanged`
+
+**Permissions Needed:**
+- Content script runs on `<all_urls>` for push-to-talk functionality
+
+---
+
+### v1.3 - Voice Input History (Side Panel)
+
+**Description:** A side panel that displays a history of all voice inputs with timestamps and source page URLs. Users can view and delete entries.
+
+**User Flow:**
+1. User clicks extension icon to open side panel (or via Chrome's side panel menu)
+2. Side panel displays all previous voice inputs in reverse chronological order
+3. Each entry shows: transcribed text, timestamp, and source page URL
+4. User can click URL to open that page
+5. User can delete individual entries or clear all history
+
+**Technical Requirements:**
+- Chrome Side Panel API (`side_panel` in manifest)
+- Store history entries in `chrome.storage.local` (no sync)
+- Each entry contains: id, text, timestamp, url
+- Real-time updates via `chrome.storage.onChanged`
+- Limit history to 500 entries to prevent storage bloat
+- Confirm dialog before clearing all history
+
+**Permissions Needed:**
+- `sidePanel` - to enable the side panel feature
+
+**Data Structure:**
+```json
+{
+  "utterHistory": [
+    {
+      "id": "unique-id",
+      "text": "transcribed text",
+      "timestamp": 1234567890,
+      "url": "https://example.com/page"
+    }
+  ]
+}
+```

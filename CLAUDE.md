@@ -26,7 +26,17 @@ npm run package
 
 # Run linting
 npm run lint
+
+# Regenerate placeholder icons
+npm run generate-icons
 ```
+
+## Required Assets
+
+Icons must exist in `src/icons/` before building:
+- `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-128.png`
+
+Run `npm run generate-icons` to create placeholder icons if missing.
 
 ## Chrome Extension Development Guidelines
 

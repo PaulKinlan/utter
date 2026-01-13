@@ -9,6 +9,11 @@ export default [
         console: 'readonly',
         document: 'readonly',
         window: 'readonly',
+        navigator: 'readonly',
+        Event: 'readonly',
+        setTimeout: 'readonly',
+        URL: 'readonly',
+        Date: 'readonly',
       },
     },
     rules: {

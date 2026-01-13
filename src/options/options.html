@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="options.css">
+  <title>Utter Options</title>
+</head>
+<body>
+  <div class="container">
+    <h1>Utter Options</h1>
+
+    <section>
+      <h2>Microphone</h2>
+      <p class="description">Select which microphone to use for speech recognition.</p>
+
+      <div class="field">
+        <label for="microphone-select">Audio Input Device</label>
+        <select id="microphone-select">
+          <option value="">Loading devices...</option>
+        </select>
+      </div>
+
+      <button id="request-permission" class="secondary">Request Microphone Permission</button>
+      <p id="permission-status" class="status"></p>
+    </section>
+
+    <section>
+      <h2>Activation Mode</h2>
+      <p class="description">Choose how to activate voice input.</p>
+
+      <div class="field">
+        <label class="radio-label">
+          <input type="radio" name="activation-mode" value="toggle" checked>
+          <span>Toggle mode</span>
+          <span class="radio-description">Press shortcut to start, press again to stop</span>
+        </label>
+        <label class="radio-label">
+          <input type="radio" name="activation-mode" value="push-to-talk">
+          <span>Push-to-talk mode</span>
+          <span class="radio-description">Hold key combo to talk, release to stop</span>
+        </label>
+      </div>
+    </section>
+
+    <section id="toggle-settings">
+      <h2>Toggle Mode Shortcut</h2>
+      <p class="description">
+        Current shortcut: <kbd id="current-shortcut">Ctrl+Shift+U</kbd>
+      </p>
+      <p class="description">
+        <a href="chrome://extensions/shortcuts" id="shortcuts-link">Change shortcut in Chrome settings</a>
+      </p>
+    </section>
+
+    <section id="ptt-settings" class="hidden">
+      <h2>Push-to-Talk Key Combo</h2>
+      <p class="description">Click the button and press your desired key combination. Default: <kbd>Option+.</kbd> (Mac) or <kbd>Alt+.</kbd> (Windows/Linux)</p>
+
+      <div class="field">
+        <label for="ptt-combo">Key Combination</label>
+        <div class="key-recorder">
+          <input type="text" id="ptt-combo" readonly placeholder="Click Record to set">
+          <button id="record-combo" class="secondary">Record</button>
+          <button id="clear-combo" class="secondary">Clear</button>
+        </div>
+        <p id="ptt-status" class="status"></p>
+      </div>
+    </section>
+
+    <div id="save-status" class="save-status"></div>
+  </div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>

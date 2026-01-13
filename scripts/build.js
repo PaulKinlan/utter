@@ -23,6 +23,14 @@ async function build() {
     await cp(`${SRC_DIR}/popup`, `${DIST_DIR}/popup`, { recursive: true });
   }
 
+  if (existsSync(`${SRC_DIR}/options`)) {
+    await cp(`${SRC_DIR}/options`, `${DIST_DIR}/options`, { recursive: true });
+  }
+
+  if (existsSync(`${SRC_DIR}/sidepanel`)) {
+    await cp(`${SRC_DIR}/sidepanel`, `${DIST_DIR}/sidepanel`, { recursive: true });
+  }
+
   // Bundle JavaScript files
   const entryPoints = [];
 
@@ -32,6 +40,10 @@ async function build() {
 
   if (existsSync(`${SRC_DIR}/content.js`)) {
     entryPoints.push(`${SRC_DIR}/content.js`);
+  }
+
+  if (existsSync(`${SRC_DIR}/ptt-listener.js`)) {
+    entryPoints.push(`${SRC_DIR}/ptt-listener.js`);
   }
 
   if (entryPoints.length > 0) {
