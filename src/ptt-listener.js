@@ -7,7 +7,8 @@
   let settings = {
     activationMode: 'toggle',
     pttKeyCombo: null,
-    selectedMicrophone: ''
+    selectedMicrophone: '',
+    soundFeedbackEnabled: true
   };
 
   let isKeyHeld = false;
@@ -24,6 +25,9 @@
     if (changes.selectedMicrophone) {
       settings.selectedMicrophone = changes.selectedMicrophone.newValue;
     }
+    if (changes.soundFeedbackEnabled !== undefined) {
+      settings.soundFeedbackEnabled = changes.soundFeedbackEnabled.newValue;
+    }
   });
 
   async function loadSettings() {
@@ -31,11 +35,13 @@
       const result = await chrome.storage.local.get([
         'activationMode',
         'pttKeyCombo',
-        'selectedMicrophone'
+        'selectedMicrophone',
+        'soundFeedbackEnabled'
       ]);
       settings.activationMode = result.activationMode || 'toggle';
       settings.pttKeyCombo = result.pttKeyCombo || null;
       settings.selectedMicrophone = result.selectedMicrophone || '';
+      settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
     } catch (err) {
       console.error('Utter: Error loading settings:', err);
     }
@@ -97,6 +103,32 @@
     return false;
   }
 
+  // Play an audio file from the extension
+  function playSound(filename) {
+    if (!settings.soundFeedbackEnabled) return;
+
+    try {
+      const audioUrl = chrome.runtime.getURL(`audio/${filename}`);
+      const audio = new Audio(audioUrl);
+      audio.volume = 0.5;
+      audio.play().catch(err => {
+        console.warn('Utter PTT: Could not play sound:', err);
+      });
+    } catch (err) {
+      console.warn('Utter PTT: Could not play sound:', err);
+    }
+  }
+
+  // Play start sound (beep)
+  function playStartSound() {
+    playSound('beep.wav');
+  }
+
+  // Play stop sound (boop)
+  function playStopSound() {
+    playSound('boop.wav');
+  }
+
   async function startRecognition() {
     // Stop any existing recognition
     if (window.__utterRecognition) {
@@ -140,6 +172,7 @@
 
     recognition.onstart = () => {
       console.log('Utter PTT: Speech recognition started');
+      playStartSound();
       showIndicator('Listening...');
     };
 
@@ -305,6 +338,7 @@
   }
 
   function cleanup() {
+    playStopSound();
     if (window.__utterMicStream) {
       window.__utterMicStream.getTracks().forEach(track => track.stop());
       window.__utterMicStream = null;
