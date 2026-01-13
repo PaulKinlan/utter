@@ -13,5 +13,10 @@ export default defineConfig({
     modulePreload: {
       polyfill: false,
     },
+    rollupOptions: {
+      input: {
+        offscreen: 'src/offscreen.html',
+      },
+    },
   },
 });

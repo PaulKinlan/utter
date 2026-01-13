@@ -1,15 +1,13 @@
 // Push-to-talk listener - runs on all pages
 // Listens for configured key combo to start/stop speech recognition
+// Speech recognition is handled by the offscreen document
 
 (function () {
   const INDICATOR_ID = 'utter-listening-indicator';
 
   let settings = {
     activationMode: 'toggle',
-    pttKeyCombo: null,
-    selectedMicrophone: '',
-    soundFeedbackEnabled: true,
-    audioVolume: 0.5
+    pttKeyCombo: null
   };
 
   let isKeyHeld = false;
@@ -23,50 +21,68 @@
     if (changes.pttKeyCombo) {
       settings.pttKeyCombo = changes.pttKeyCombo.newValue;
     }
-    if (changes.selectedMicrophone) {
-      settings.selectedMicrophone = changes.selectedMicrophone.newValue;
-    }
-    if (changes.soundFeedbackEnabled !== undefined) {
-      settings.soundFeedbackEnabled = changes.soundFeedbackEnabled.newValue;
-    }
-    if (changes.audioVolume !== undefined) {
-      settings.audioVolume = changes.audioVolume.newValue;
-    }
   });
 
   async function loadSettings() {
     try {
-      const result = await chrome.storage.local.get([
-        'activationMode',
-        'pttKeyCombo',
-        'selectedMicrophone',
-        'soundFeedbackEnabled',
-        'audioVolume'
-      ]);
+      const result = await chrome.storage.local.get(['activationMode', 'pttKeyCombo']);
       settings.activationMode = result.activationMode || 'toggle';
       settings.pttKeyCombo = result.pttKeyCombo || null;
-      settings.selectedMicrophone = result.selectedMicrophone || '';
-      settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
-      settings.audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
     } catch (err) {
-      console.error('Utter: Error loading settings:', err);
+      console.error('Utter PTT: Error loading settings:', err);
+    }
+  }
+
+  // Set up message listener for recognition events
+  chrome.runtime.onMessage.addListener((message) => {
+    handleRecognitionMessage(message);
+  });
+
+  function handleRecognitionMessage(message) {
+    // Only handle if PTT mode and key is held
+    if (settings.activationMode !== 'push-to-talk') return;
+
+    switch (message.type) {
+      case 'recognition-started':
+        showIndicator('Listening...');
+        break;
+
+      case 'recognition-result':
+        if (message.finalTranscript) {
+          insertText(window.__utterTargetElement, message.finalTranscript);
+          saveToHistory(message.finalTranscript);
+        }
+        if (message.interimTranscript) {
+          updateIndicator(`Listening: ${message.interimTranscript}`);
+        } else {
+          updateIndicator('Listening...');
+        }
+        break;
+
+      case 'recognition-error':
+        if (message.recoverable) {
+          updateIndicator('Listening... (speak now)');
+        } else {
+          showIndicator(`Error: ${message.error}`, true);
+          cleanup();
+        }
+        break;
+
+      case 'recognition-ended':
+        cleanup();
+        break;
     }
   }
 
   // Listen for keydown
   document.addEventListener('keydown', async (e) => {
-    // Only handle push-to-talk mode
     if (settings.activationMode !== 'push-to-talk') return;
     if (!settings.pttKeyCombo) return;
-
-    // Check if key combo matches
     if (!matchesCombo(e, settings.pttKeyCombo)) return;
 
-    // Prevent default and stop propagation
     e.preventDefault();
     e.stopPropagation();
 
-    // Don't restart if already held
     if (isKeyHeld) return;
     isKeyHeld = true;
 
@@ -76,12 +92,10 @@
 
   // Listen for keyup
   document.addEventListener('keyup', (e) => {
-    // Only handle push-to-talk mode
     if (settings.activationMode !== 'push-to-talk') return;
     if (!settings.pttKeyCombo) return;
     if (!isKeyHeld) return;
 
-    // Check if the released key is part of our combo
     if (isPartOfCombo(e, settings.pttKeyCombo)) {
       console.log('Utter PTT: Key released, stopping recognition');
       isKeyHeld = false;
@@ -100,7 +114,6 @@
   }
 
   function isPartOfCombo(e, combo) {
-    // Check if the released key is the main key or any required modifier
     if (e.key === combo.key || e.code === combo.code) return true;
     if (combo.ctrlKey && e.key === 'Control') return true;
     if (combo.shiftKey && e.key === 'Shift') return true;
@@ -109,43 +122,9 @@
     return false;
   }
 
-  // Play an audio file from the extension
-  function playSound(filename) {
-    if (!settings.soundFeedbackEnabled) return;
-
-    try {
-      const audioUrl = chrome.runtime.getURL(`audio/${filename}`);
-      const audio = new Audio(audioUrl);
-      audio.volume = settings.audioVolume;
-      audio.play().catch(err => {
-        console.warn('Utter PTT: Could not play sound:', err);
-      });
-    } catch (err) {
-      console.warn('Utter PTT: Could not play sound:', err);
-    }
-  }
-
-  // Play start sound (beep)
-  function playStartSound() {
-    playSound('beep.wav');
-  }
-
-  // Play stop sound (boop)
-  function playStopSound() {
-    playSound('boop.wav');
-  }
-
   async function startRecognition() {
-    // Stop any existing recognition
-    if (window.__utterRecognition) {
-      const oldRecognition = window.__utterRecognition;
-      window.__utterRecognition = null;
-      oldRecognition.stop();
-    }
-
     const targetElement = document.activeElement;
 
-    // Check if the active element is a text input
     const isTextInput =
       (targetElement.tagName === 'INPUT' && isTextInputType(targetElement.type)) ||
       targetElement.tagName === 'TEXTAREA' ||
@@ -153,120 +132,18 @@
 
     if (!isTextInput) {
       showIndicator('Focus on a text field first', true);
+      isKeyHeld = false;
       return;
     }
 
-    // Check for Speech Recognition API support
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      showIndicator('Speech Recognition not supported', true);
-      return;
-    }
-
-    // Prime the selected microphone
-    const micStream = await primeSelectedMicrophone();
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = navigator.language || 'en-US';
-
-    window.__utterRecognition = recognition;
     window.__utterTargetElement = targetElement;
-    window.__utterMicStream = micStream;
+    showIndicator('Starting...');
 
-    recognition.onstart = () => {
-      console.log('Utter PTT: Speech recognition started');
-      playStartSound();
-      showIndicator('Listening...');
-    };
-
-    recognition.onresult = (event) => {
-      let interimTranscript = '';
-      let finalTranscript = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript;
-        } else {
-          interimTranscript += transcript;
-        }
-      }
-
-      if (finalTranscript) {
-        insertText(window.__utterTargetElement, finalTranscript);
-        saveToHistory(finalTranscript);
-      }
-
-      if (interimTranscript) {
-        updateIndicator(`Listening: ${interimTranscript}`);
-      } else {
-        updateIndicator('Listening...');
-      }
-    };
-
-    recognition.onerror = (event) => {
-      console.warn('Utter PTT: Speech recognition error:', event.error);
-
-      if (event.error === 'no-speech' || event.error === 'aborted') {
-        updateIndicator('Listening... (speak now)');
-        return;
-      }
-
-      showIndicator(`Error: ${event.error}`, true);
-      cleanup();
-    };
-
-    recognition.onend = () => {
-      console.log('Utter PTT: Speech recognition ended');
-
-      // In PTT mode, only restart if key is still held
-      if (window.__utterRecognition && isKeyHeld) {
-        console.log('Utter PTT: Restarting recognition (key still held)');
-        try {
-          recognition.start();
-        } catch (err) {
-          console.error('Utter PTT: Failed to restart:', err);
-          cleanup();
-        }
-        return;
-      }
-
-      cleanup();
-    };
-
-    recognition.start();
+    chrome.runtime.sendMessage({ type: 'start-recognition-request' });
   }
 
   function stopRecognition() {
-    if (window.__utterRecognition) {
-      const recognition = window.__utterRecognition;
-      window.__utterRecognition = null;
-      recognition.stop();
-    }
-  }
-
-  async function primeSelectedMicrophone() {
-    try {
-      if (!settings.selectedMicrophone) {
-        return null;
-      }
-
-      const constraints = {
-        audio: {
-          deviceId: { exact: settings.selectedMicrophone }
-        }
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      return stream;
-    } catch (err) {
-      console.warn('Utter PTT: Could not prime microphone:', err.message);
-      return null;
-    }
+    chrome.runtime.sendMessage({ type: 'stop-recognition-request' });
   }
 
   function isTextInputType(type) {
@@ -344,12 +221,6 @@
   }
 
   function cleanup() {
-    playStopSound();
-    if (window.__utterMicStream) {
-      window.__utterMicStream.getTracks().forEach(track => track.stop());
-      window.__utterMicStream = null;
-    }
-    window.__utterRecognition = null;
     window.__utterTargetElement = null;
     removeIndicator();
   }
@@ -366,7 +237,6 @@
         url: window.location.href
       });
 
-      // Keep only the last 500 entries to prevent storage bloat
       const trimmedHistory = history.slice(-500);
 
       await chrome.storage.local.set({ utterHistory: trimmedHistory });

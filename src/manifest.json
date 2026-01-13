@@ -20,7 +20,8 @@
     "activeTab",
     "scripting",
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "offscreen"
   ],
   "side_panel": {
     "default_path": "sidepanel/sidepanel.html"
