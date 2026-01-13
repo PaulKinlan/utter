@@ -49,7 +49,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         metaKey: false,
         key: '.',
         code: 'Period'
-      }
+      },
+      audioVolume: 0.5  // Default audio volume (0.0 to 1.0)
     };
 
     await chrome.storage.local.set(defaults);

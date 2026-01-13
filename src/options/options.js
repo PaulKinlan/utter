@@ -21,6 +21,11 @@ const pttStatus = document.getElementById('ptt-status');
 // Sound feedback element
 const soundFeedbackCheckbox = document.getElementById('sound-feedback');
 
+// Volume control elements
+const volumeSlider = document.getElementById('volume-slider');
+const volumeValue = document.getElementById('volume-value');
+const testSoundBtn = document.getElementById('test-sound');
+
 let isRecording = false;
 
 // Chrome doesn't allow direct links to chrome:// URLs, so we handle it
@@ -105,7 +110,8 @@ async function loadSavedSettings() {
       'selectedMicrophone',
       'activationMode',
       'pttKeyCombo',
-      'soundFeedbackEnabled'
+      'soundFeedbackEnabled',
+      'audioVolume'
     ]);
 
     if (result.selectedMicrophone) {
@@ -124,6 +130,11 @@ async function loadSavedSettings() {
 
     // Set sound feedback (default to true if not set)
     soundFeedbackCheckbox.checked = result.soundFeedbackEnabled !== false;
+
+    // Set volume (default to 50% if not set)
+    const volume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
+    volumeSlider.value = Math.round(volume * 100);
+    volumeValue.textContent = `${Math.round(volume * 100)}%`;
   } catch (err) {
     console.error('Error loading settings:', err);
   }
@@ -307,4 +318,30 @@ soundFeedbackCheckbox.addEventListener('change', async () => {
   } catch (err) {
     console.error('Error saving sound feedback setting:', err);
   }
+});
+
+// Volume slider change
+volumeSlider.addEventListener('input', () => {
+  volumeValue.textContent = `${volumeSlider.value}%`;
+});
+
+volumeSlider.addEventListener('change', async () => {
+  try {
+    const volume = parseInt(volumeSlider.value, 10) / 100;
+    await chrome.storage.local.set({ audioVolume: volume });
+    showSaveStatus();
+  } catch (err) {
+    console.error('Error saving volume setting:', err);
+  }
+});
+
+// Test sound button
+testSoundBtn.addEventListener('click', () => {
+  const volume = parseInt(volumeSlider.value, 10) / 100;
+  const audioUrl = chrome.runtime.getURL('audio/beep.wav');
+  const audio = new Audio(audioUrl);
+  audio.volume = volume;
+  audio.play().catch(err => {
+    console.warn('Could not play test sound:', err);
+  });
 });

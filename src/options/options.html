@@ -78,6 +78,15 @@
           <span>Play sounds on start/stop</span>
         </label>
       </div>
+
+      <div class="field" id="volume-field">
+        <label for="volume-slider">Volume</label>
+        <div class="volume-control">
+          <input type="range" id="volume-slider" min="0" max="100" value="50">
+          <span id="volume-value">50%</span>
+          <button id="test-sound" class="secondary">Test</button>
+        </div>
+      </div>
     </section>
 
     <div id="save-status" class="save-status"></div>
