@@ -211,3 +211,22 @@ a:hover {
 .key-recorder button {
   flex-shrink: 0;
 }
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: normal;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.checkbox-label span {
+  font-weight: 500;
+}
