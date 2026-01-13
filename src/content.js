@@ -4,6 +4,58 @@
 (async function () {
   const INDICATOR_ID = 'utter-listening-indicator';
 
+  // Sound feedback settings
+  let soundFeedbackEnabled = true;
+
+  // Load sound feedback setting
+  try {
+    const result = await chrome.storage.local.get(['soundFeedbackEnabled']);
+    soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
+  } catch (err) {
+    console.warn('Utter: Could not load sound settings:', err);
+  }
+
+  // Play a tone using Web Audio API
+  function playTone(frequency, duration = 150, type = 'sine') {
+    if (!soundFeedbackEnabled) return;
+
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.value = frequency;
+      oscillator.type = type;
+
+      // Quick fade in and out for a pleasant sound
+      const now = audioContext.currentTime;
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(0.3, now + 0.01);
+      gainNode.gain.linearRampToValueAtTime(0, now + duration / 1000);
+
+      oscillator.start(now);
+      oscillator.stop(now + duration / 1000);
+
+      // Clean up after sound finishes
+      oscillator.onended = () => audioContext.close();
+    } catch (err) {
+      console.warn('Utter: Could not play sound:', err);
+    }
+  }
+
+  // Play start sound (higher pitch "bing")
+  function playStartSound() {
+    playTone(880, 120); // A5 note
+  }
+
+  // Play stop sound (lower pitch "boop")
+  function playStopSound() {
+    playTone(440, 150); // A4 note
+  }
+
   // Check if we already have a recognition instance running - toggle off
   if (window.__utterRecognition) {
     console.log('Utter: Stopping recognition (toggle off)');
@@ -52,6 +104,7 @@
 
   recognition.onstart = () => {
     console.log('Utter: Speech recognition started');
+    playStartSound();
     showIndicator('Listening...');
   };
 
@@ -237,6 +290,7 @@
   }
 
   function cleanup() {
+    playStopSound();
     // Stop the microphone stream if we have one
     if (window.__utterMicStream) {
       window.__utterMicStream.getTracks().forEach(track => track.stop());

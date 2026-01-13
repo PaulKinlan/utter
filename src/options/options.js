@@ -17,6 +17,9 @@ const recordComboBtn = document.getElementById('record-combo');
 const clearComboBtn = document.getElementById('clear-combo');
 const pttStatus = document.getElementById('ptt-status');
 
+// Sound feedback element
+const soundFeedbackCheckbox = document.getElementById('sound-feedback');
+
 let isRecording = false;
 
 // Chrome doesn't allow direct links to chrome:// URLs, so we handle it
@@ -84,7 +87,8 @@ async function loadSavedSettings() {
     const result = await chrome.storage.local.get([
       'selectedMicrophone',
       'activationMode',
-      'pttKeyCombo'
+      'pttKeyCombo',
+      'soundFeedbackEnabled'
     ]);
 
     if (result.selectedMicrophone) {
@@ -100,6 +104,9 @@ async function loadSavedSettings() {
     if (result.pttKeyCombo) {
       pttComboInput.value = formatKeyCombo(result.pttKeyCombo);
     }
+
+    // Set sound feedback (default to true if not set)
+    soundFeedbackCheckbox.checked = result.soundFeedbackEnabled !== false;
   } catch (err) {
     console.error('Error loading settings:', err);
   }
@@ -267,3 +274,15 @@ function showSaveStatus() {
     saveStatus.classList.remove('visible');
   }, 2000);
 }
+
+// Sound feedback change
+soundFeedbackCheckbox.addEventListener('change', async () => {
+  try {
+    await chrome.storage.local.set({
+      soundFeedbackEnabled: soundFeedbackCheckbox.checked
+    });
+    showSaveStatus();
+  } catch (err) {
+    console.error('Error saving sound feedback setting:', err);
+  }
+});
