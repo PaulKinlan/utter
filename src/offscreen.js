@@ -52,16 +52,33 @@ function playSound(filename) {
 
 // Prime the selected microphone
 async function primeSelectedMicrophone() {
-  try {
-    const constraints = {
-      audio: settings.selectedMicrophone
-        ? { deviceId: { exact: settings.selectedMicrophone } }
-        : true
-    };
+  // If a specific microphone is selected, try to use it
+  if (settings.selectedMicrophone) {
+    try {
+      const constraints = {
+        audio: { deviceId: { exact: settings.selectedMicrophone } }
+      };
 
-    console.log('Utter Offscreen: Requesting microphone with constraints:', constraints);
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    console.log('Utter Offscreen: Microphone access granted');
+      console.log('Utter Offscreen: Requesting specific microphone:', settings.selectedMicrophone);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('Utter Offscreen: Microphone access granted');
+      return stream;
+    } catch (err) {
+      // If the selected microphone is unavailable, fall back to default
+      if (err.name === 'OverconstrainedError') {
+        console.warn('Utter Offscreen: Selected microphone unavailable, falling back to default');
+      } else {
+        console.error('Utter Offscreen: Could not get selected microphone:', err);
+        throw err;
+      }
+    }
+  }
+
+  // Use default microphone
+  try {
+    console.log('Utter Offscreen: Requesting default microphone');
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log('Utter Offscreen: Default microphone access granted');
     return stream;
   } catch (err) {
     console.error('Utter Offscreen: Could not get microphone:', err);
