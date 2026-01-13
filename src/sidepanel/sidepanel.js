@@ -20,6 +20,15 @@ async function init() {
       renderHistory();
     }
   });
+
+  // Reload history when sidepanel becomes visible again
+  // This handles the case where voice input happens while sidepanel is closed/hidden
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState === 'visible') {
+      await loadHistory();
+      renderHistory();
+    }
+  });
 }
 
 async function loadHistory() {
