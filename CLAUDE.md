@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Chrome extension project targeting the latest stable Chrome version using Manifest V3.
+Utter is a Chrome extension that provides a global hotkey to invoke the Web Speech Recognition API for voice-to-text input. Targets the latest stable Chrome version using Manifest V3.
+
+## Documentation Workflow
+
+When adding new features:
+1. Update `PRODUCT_REQUIREMENTS.md` with the feature description, user flow, and technical requirements
+2. Keep the requirements file in sync with implemented functionality
 
 ## Build Commands
 
