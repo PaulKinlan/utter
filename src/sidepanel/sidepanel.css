@@ -36,6 +36,12 @@ h1 {
   font-weight: 600;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .icon-button {
   display: flex;
   align-items: center;

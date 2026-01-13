@@ -2,6 +2,7 @@
 
 const historyList = document.getElementById('history-list');
 const clearAllBtn = document.getElementById('clear-all');
+const settingsBtn = document.getElementById('settings');
 
 let history = [];
 
@@ -228,3 +229,8 @@ function showConfirmDialog(title, message, onConfirm) {
     }
   });
 }
+
+// Settings button opens options page
+settingsBtn.addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
+});
