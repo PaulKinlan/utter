@@ -8,7 +8,8 @@
     activationMode: 'toggle',
     pttKeyCombo: null,
     selectedMicrophone: '',
-    soundFeedbackEnabled: true
+    soundFeedbackEnabled: true,
+    audioVolume: 0.5
   };
 
   let isKeyHeld = false;
@@ -28,6 +29,9 @@
     if (changes.soundFeedbackEnabled !== undefined) {
       settings.soundFeedbackEnabled = changes.soundFeedbackEnabled.newValue;
     }
+    if (changes.audioVolume !== undefined) {
+      settings.audioVolume = changes.audioVolume.newValue;
+    }
   });
 
   async function loadSettings() {
@@ -36,12 +40,14 @@
         'activationMode',
         'pttKeyCombo',
         'selectedMicrophone',
-        'soundFeedbackEnabled'
+        'soundFeedbackEnabled',
+        'audioVolume'
       ]);
       settings.activationMode = result.activationMode || 'toggle';
       settings.pttKeyCombo = result.pttKeyCombo || null;
       settings.selectedMicrophone = result.selectedMicrophone || '';
       settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
+      settings.audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
     } catch (err) {
       console.error('Utter: Error loading settings:', err);
     }
@@ -110,7 +116,7 @@
     try {
       const audioUrl = chrome.runtime.getURL(`audio/${filename}`);
       const audio = new Audio(audioUrl);
-      audio.volume = 0.5;
+      audio.volume = settings.audioVolume;
       audio.play().catch(err => {
         console.warn('Utter PTT: Could not play sound:', err);
       });

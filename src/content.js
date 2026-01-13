@@ -6,11 +6,13 @@
 
   // Sound feedback settings
   let soundFeedbackEnabled = true;
+  let audioVolume = 0.5;
 
-  // Load sound feedback setting
+  // Load sound feedback settings
   try {
-    const result = await chrome.storage.local.get(['soundFeedbackEnabled']);
+    const result = await chrome.storage.local.get(['soundFeedbackEnabled', 'audioVolume']);
     soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
+    audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
   } catch (err) {
     console.warn('Utter: Could not load sound settings:', err);
   }
@@ -22,7 +24,7 @@
     try {
       const audioUrl = chrome.runtime.getURL(`audio/${filename}`);
       const audio = new Audio(audioUrl);
-      audio.volume = 0.5;
+      audio.volume = audioVolume;
       audio.play().catch(err => {
         console.warn('Utter: Could not play sound:', err);
       });
