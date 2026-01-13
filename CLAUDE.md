@@ -47,6 +47,18 @@ Run `npm run generate-icons` to create placeholder icons if missing.
 - Prefer `chrome.scripting` over deprecated `chrome.tabs.executeScript`
 - Use `chrome.storage.session` for temporary data, `chrome.storage.local` for persistent data
 
+### Browser Compatibility
+- **Target: Latest stable Chrome only** (currently Chrome 130+)
+- **No polyfills required** - all modern web platform features are available:
+  - Native ES modules with `import`/`export`
+  - Top-level `await`
+  - `modulepreload` (no polyfill needed)
+  - Native `fetch`, `Promise`, `async/await`
+  - All modern CSS features (container queries, `:has()`, nesting, etc.)
+  - All modern JavaScript features (optional chaining, nullish coalescing, private fields, etc.)
+- **Do not add polyfills or compatibility shims** - if a feature isn't available in the latest Chrome, find an alternative approach rather than polyfilling
+- Remove any existing polyfills found in the codebase - they add unnecessary bloat
+
 ### Permissions
 - Request only the minimum permissions required for functionality
 - Prefer `activeTab` over broad host permissions when possible
