@@ -162,8 +162,23 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 // Handle messages from offscreen document and content scripts
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Utter Background: Received message:', message, 'from:', sender);
+
+  // Handle settings request from offscreen document
+  if (message.type === 'get-settings' && message.target === 'background') {
+    chrome.storage.local.get([
+      'selectedMicrophone',
+      'soundFeedbackEnabled',
+      'audioVolume'
+    ]).then(result => {
+      sendResponse(result);
+    }).catch(err => {
+      console.error('Utter Background: Error getting settings:', err);
+      sendResponse({});
+    });
+    return true; // Will respond asynchronously
+  }
 
   // Messages from content scripts
   if (message.type === 'start-recognition-request') {
@@ -226,6 +241,41 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (activeSessions.has(tabId)) {
     console.log('Utter: Tab closed, stopping recognition for tab', tabId);
     stopRecognitionForTab(tabId);
+  }
+});
+
+// Forward storage changes to offscreen document
+chrome.storage.onChanged.addListener(async (changes, areaName) => {
+  if (areaName !== 'local') return;
+
+  // Only forward relevant settings
+  const relevantKeys = ['selectedMicrophone', 'soundFeedbackEnabled', 'audioVolume'];
+  const changedSettings = {};
+  let hasRelevantChanges = false;
+
+  for (const key of relevantKeys) {
+    if (changes[key]) {
+      changedSettings[key] = changes[key].newValue;
+      hasRelevantChanges = true;
+    }
+  }
+
+  if (!hasRelevantChanges) return;
+
+  // Check if offscreen document exists before sending
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+  });
+
+  if (existingContexts.length > 0) {
+    chrome.runtime.sendMessage({
+      target: 'offscreen',
+      type: 'settings-updated',
+      settings: changedSettings
+    }).catch(err => {
+      console.warn('Utter Background: Could not forward settings to offscreen:', err);
+    });
   }
 });
 

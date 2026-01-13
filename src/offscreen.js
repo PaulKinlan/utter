@@ -1,69 +1,42 @@
 // Offscreen document for speech recognition
-// This runs in an extension context with stable permissions for getUserMedia and SpeechRecognition
+// This runs in an extension context with limited API access - only chrome.runtime is available
+// Settings must be requested from the background script via messaging
 
 let recognition = null;
 let micStream = null;
 let currentSessionId = null;
 
-// Settings cache
+// Settings cache (populated via messaging from background script)
 let settings = {
   selectedMicrophone: '',
   soundFeedbackEnabled: true,
   audioVolume: 0.5
 };
 
-// Check if chrome APIs are available (may not be during dev hot reload)
-function isChromeStorageAvailable() {
-  return typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local;
-}
-
-function isChromeRuntimeAvailable() {
-  return typeof chrome !== 'undefined' && chrome.runtime;
-}
-
-// Load settings on startup (deferred to ensure chrome APIs are available)
-if (isChromeStorageAvailable()) {
-  loadSettings();
-
-  chrome.storage.onChanged.addListener((changes) => {
-    if (changes.selectedMicrophone) {
-      settings.selectedMicrophone = changes.selectedMicrophone.newValue;
-    }
-    if (changes.soundFeedbackEnabled !== undefined) {
-      settings.soundFeedbackEnabled = changes.soundFeedbackEnabled.newValue;
-    }
-    if (changes.audioVolume !== undefined) {
-      settings.audioVolume = changes.audioVolume.newValue;
-    }
-  });
-} else {
-  console.warn('Utter Offscreen: chrome.storage not available, using defaults');
-}
-
+// Request settings from the background script
 async function loadSettings() {
-  if (!isChromeStorageAvailable()) {
-    console.warn('Utter Offscreen: chrome.storage not available, using defaults');
-    return;
-  }
-
   try {
-    const result = await chrome.storage.local.get([
-      'selectedMicrophone',
-      'soundFeedbackEnabled',
-      'audioVolume'
-    ]);
-    settings.selectedMicrophone = result.selectedMicrophone || '';
-    settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
-    settings.audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
+    const response = await chrome.runtime.sendMessage({
+      type: 'get-settings',
+      target: 'background'
+    });
+    if (response) {
+      settings.selectedMicrophone = response.selectedMicrophone || '';
+      settings.soundFeedbackEnabled = response.soundFeedbackEnabled !== false;
+      settings.audioVolume = response.audioVolume !== undefined ? response.audioVolume : 0.5;
+      console.log('Utter Offscreen: Settings loaded:', settings);
+    }
   } catch (err) {
     console.error('Utter Offscreen: Error loading settings:', err);
   }
 }
 
+// Load settings on startup
+loadSettings();
+
 // Play audio feedback
 function playSound(filename) {
   if (!settings.soundFeedbackEnabled) return;
-  if (!isChromeRuntimeAvailable()) return;
 
   try {
     const audioUrl = chrome.runtime.getURL(`audio/${filename}`);
@@ -257,42 +230,50 @@ function cleanup() {
 }
 
 function sendToBackground(message) {
-  if (!isChromeRuntimeAvailable()) {
-    console.warn('Utter Offscreen: chrome.runtime not available, cannot send message');
-    return;
-  }
   chrome.runtime.sendMessage(message).catch(err => {
     console.warn('Utter Offscreen: Could not send message to background:', err);
   });
 }
 
 // Listen for messages from background script
-if (isChromeRuntimeAvailable()) {
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    console.log('Utter Offscreen: Received message:', message);
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log('Utter Offscreen: Received message:', message);
 
-    if (message.target !== 'offscreen') {
-      return;
-    }
+  if (message.target !== 'offscreen') {
+    return;
+  }
 
-    switch (message.type) {
-      case 'start-recognition':
-        startRecognition(message.sessionId).then(result => {
-          sendResponse(result);
-        });
-        return true; // Will respond asynchronously
+  switch (message.type) {
+    case 'start-recognition':
+      startRecognition(message.sessionId).then(result => {
+        sendResponse(result);
+      });
+      return true; // Will respond asynchronously
 
-      case 'stop-recognition':
-        stopRecognition(message.sessionId);
-        sendResponse({ success: true });
-        break;
+    case 'stop-recognition':
+      stopRecognition(message.sessionId);
+      sendResponse({ success: true });
+      break;
 
-      default:
-        console.warn('Utter Offscreen: Unknown message type:', message.type);
-    }
-  });
+    case 'settings-updated':
+      // Update cached settings when background notifies of changes
+      if (message.settings) {
+        if (message.settings.selectedMicrophone !== undefined) {
+          settings.selectedMicrophone = message.settings.selectedMicrophone;
+        }
+        if (message.settings.soundFeedbackEnabled !== undefined) {
+          settings.soundFeedbackEnabled = message.settings.soundFeedbackEnabled;
+        }
+        if (message.settings.audioVolume !== undefined) {
+          settings.audioVolume = message.settings.audioVolume;
+        }
+        console.log('Utter Offscreen: Settings updated:', settings);
+      }
+      break;
 
-  console.log('Utter Offscreen: Document loaded and ready');
-} else {
-  console.warn('Utter Offscreen: chrome.runtime not available, message listener not registered');
-}
+    default:
+      console.warn('Utter Offscreen: Unknown message type:', message.type);
+  }
+});
+
+console.log('Utter Offscreen: Document loaded and ready');
