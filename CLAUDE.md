@@ -66,3 +66,11 @@ Run `npm run generate-icons` to create placeholder icons if missing.
 - Use ES modules where supported
 - Prefer async/await over callbacks for Chrome APIs
 - All Chrome API calls should handle errors appropriately
+
+## Source Control
+
+- **Always commit automatically** when you complete a task or logical unit of work - do not ask for permission
+- Write descriptive commit messages that explain:
+  - What changed (summary of the diff)
+  - Why it changed (the purpose/intent of the change)
+- Use conventional commit format when appropriate (e.g., `feat:`, `fix:`, `refactor:`, `docs:`)
