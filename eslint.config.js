@@ -5,6 +5,7 @@ export default [
       ecmaVersion: 'latest',
       sourceType: 'module',
       globals: {
+        Audio: 'readonly',
         chrome: 'readonly',
         console: 'readonly',
         document: 'readonly',
