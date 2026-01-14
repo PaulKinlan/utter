@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Utter Recognition</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 8px;
+      font-family: system-ui, sans-serif;
+      font-size: 12px;
+      background: #3b82f6;
+      color: white;
+      min-height: 100%;
+      box-sizing: border-box;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pulse {
+      width: 8px;
+      height: 8px;
+      background: white;
+      border-radius: 50%;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .error {
+      background: #ef4444;
+    }
+    .interim {
+      margin-top: 4px;
+      font-size: 11px;
+      opacity: 0.9;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="status">
+    <div class="pulse" id="pulse"></div>
+    <span id="status-text">Starting...</span>
+  </div>
+  <div class="interim" id="interim"></div>
+  <script src="recognition-frame.js"></script>
+</body>
+</html>

@@ -52,7 +52,13 @@
   "web_accessible_resources": [
     {
       "matches": ["<all_urls>"],
-      "resources": ["content.js", "audio/beep.wav", "audio/boop.wav"]
+      "resources": [
+        "content.js",
+        "audio/beep.wav",
+        "audio/boop.wav",
+        "recognition-frame/recognition-frame.html",
+        "recognition-frame/recognition-frame.js"
+      ]
     }
   ]
 }

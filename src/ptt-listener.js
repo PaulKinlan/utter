@@ -1,9 +1,10 @@
 // Push-to-talk listener - runs on all pages
 // Listens for configured key combo to start/stop speech recognition
-// Speech recognition is handled by the sidepanel
+// Uses an iframe to run speech recognition directly (no sidepanel needed)
 
 (function () {
   const INDICATOR_ID = 'utter-listening-indicator';
+  const IFRAME_ID = 'utter-recognition-frame';
 
   let settings = {
     activationMode: 'toggle',
@@ -12,6 +13,7 @@
 
   let isKeyHeld = false;
   let contextInvalidated = false;
+  let recognitionFrame = null;
 
   // Check if extension context is still valid
   function isContextValid() {
@@ -49,16 +51,13 @@
     }
   }
 
-  // Set up message listener for recognition events
-  chrome.runtime.onMessage.addListener((message) => {
-    if (!isContextValid()) return;
-    handleRecognitionMessage(message);
+  // Listen for messages from recognition iframe
+  window.addEventListener('message', (event) => {
+    if (event.data?.source !== 'utter-recognition-frame') return;
+    handleRecognitionMessage(event.data);
   });
 
   function handleRecognitionMessage(message) {
-    // Only handle if PTT mode and key is held
-    if (settings.activationMode !== 'push-to-talk') return;
-
     switch (message.type) {
       case 'recognition-started':
         showIndicator('Listening...');
@@ -164,23 +163,68 @@
     window.__utterTargetElement = targetElement;
     showIndicator('Starting...');
 
+    // Create iframe for speech recognition
+    // This happens directly in response to keydown (user gesture)
+    createRecognitionFrame();
+  }
+
+  function createRecognitionFrame() {
+    // Remove any existing frame
+    removeRecognitionFrame();
+
     try {
-      chrome.runtime.sendMessage({ type: 'start-recognition-request' });
+      const frameUrl = chrome.runtime.getURL('recognition-frame/recognition-frame.html');
+
+      recognitionFrame = document.createElement('iframe');
+      recognitionFrame.id = IFRAME_ID;
+      recognitionFrame.src = frameUrl;
+      recognitionFrame.allow = 'microphone';
+      recognitionFrame.style.cssText = `
+        position: fixed;
+        bottom: 60px;
+        right: 20px;
+        width: 220px;
+        height: 60px;
+        border: none;
+        border-radius: 8px;
+        z-index: 2147483647;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      `;
+
+      document.body.appendChild(recognitionFrame);
+      console.log('Utter PTT: Recognition frame created');
     } catch (err) {
-      if (err.message?.includes('Extension context invalidated')) {
-        contextInvalidated = true;
-        showIndicator('Extension updated - reload page', true);
-      }
+      console.error('Utter PTT: Failed to create recognition frame:', err);
+      showIndicator('Failed to start recognition', true);
+      isKeyHeld = false;
+    }
+  }
+
+  function removeRecognitionFrame() {
+    if (recognitionFrame) {
+      recognitionFrame.remove();
+      recognitionFrame = null;
+    }
+    // Also remove any orphaned frames
+    const existingFrame = document.getElementById(IFRAME_ID);
+    if (existingFrame) {
+      existingFrame.remove();
     }
   }
 
   function stopRecognition() {
-    if (!isContextValid()) return;
-    try {
-      chrome.runtime.sendMessage({ type: 'stop-recognition-request' });
-    } catch {
-      // Context invalidated, ignore
+    // Send stop message to iframe
+    if (recognitionFrame?.contentWindow) {
+      recognitionFrame.contentWindow.postMessage({
+        target: 'utter-recognition-frame',
+        type: 'stop'
+      }, '*');
     }
+
+    // Give iframe a moment to send final results, then remove
+    setTimeout(() => {
+      removeRecognitionFrame();
+    }, 100);
   }
 
   function isTextInputType(type) {
@@ -292,6 +336,7 @@
   function cleanup() {
     window.__utterTargetElement = null;
     removeIndicator();
+    removeRecognitionFrame();
   }
 
   async function saveToHistory(text) {
