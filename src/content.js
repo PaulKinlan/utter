@@ -1,8 +1,9 @@
 // Content script for speech recognition UI and text insertion
-// Speech recognition is handled by the sidepanel
+// Uses iframe for speech recognition (like PTT mode)
 
 (async function () {
   const INDICATOR_ID = 'utter-listening-indicator';
+  const IFRAME_ID = 'utter-recognition-frame';
 
   // Check if extension context is still valid
   function isContextValid() {
@@ -23,12 +24,7 @@
   if (window.__utterActive) {
     console.log('Utter: Stopping recognition (toggle off)');
     window.__utterActive = false;
-    try {
-      chrome.runtime.sendMessage({ type: 'stop-recognition-request' });
-    } catch {
-      // Context invalidated
-    }
-    removeIndicator();
+    stopRecognition();
     return;
   }
 
@@ -52,32 +48,25 @@
   window.__utterActive = true;
   window.__utterTargetElement = targetElement;
 
-  // Set up message listener for recognition events
+  // Set up message listener for recognition events from iframe
   if (!window.__utterMessageListener) {
-    window.__utterMessageListener = (message) => {
-      if (!isContextValid()) return;
-      handleRecognitionMessage(message);
+    window.__utterMessageListener = (event) => {
+      if (event.data?.source !== 'utter-recognition-frame') return;
+      handleRecognitionMessage(event.data);
     };
-    chrome.runtime.onMessage.addListener(window.__utterMessageListener);
+    window.addEventListener('message', window.__utterMessageListener);
   }
 
-  // Show initial indicator
-  showIndicator('Starting...');
-
-  // Request recognition start from background
-  try {
-    chrome.runtime.sendMessage({ type: 'start-recognition-request' });
-  } catch {
-    showIndicator('Extension updated - reload page', true);
-    return;
-  }
+  // Create the recognition iframe
+  createRecognitionFrame();
 
   function handleRecognitionMessage(message) {
     console.log('Utter Content: Received message:', message);
 
     switch (message.type) {
       case 'recognition-started':
-        showIndicator('Listening...');
+        // Iframe shows its own "Listening..." status
+        removeIndicator();
         break;
 
       case 'recognition-result':
@@ -85,17 +74,11 @@
           insertText(window.__utterTargetElement, message.finalTranscript);
           saveToHistory(message.finalTranscript);
         }
-        if (message.interimTranscript) {
-          updateIndicator(`Listening: ${message.interimTranscript}`);
-        } else {
-          updateIndicator('Listening...');
-        }
+        // Iframe shows interim transcription
         break;
 
       case 'recognition-error':
-        if (message.recoverable) {
-          updateIndicator('Listening... (speak now)');
-        } else {
+        if (!message.recoverable) {
           showIndicator(`Error: ${message.error}`, true);
           cleanup();
         }
@@ -105,6 +88,65 @@
         cleanup();
         break;
     }
+  }
+
+  function createRecognitionFrame() {
+    // Remove any existing frame
+    removeRecognitionFrame();
+
+    try {
+      const frameUrl = chrome.runtime.getURL('recognition-frame/recognition-frame.html');
+
+      window.__utterRecognitionFrame = document.createElement('iframe');
+      window.__utterRecognitionFrame.id = IFRAME_ID;
+      window.__utterRecognitionFrame.src = frameUrl;
+      window.__utterRecognitionFrame.allow = 'microphone';
+      window.__utterRecognitionFrame.style.cssText = `
+        position: fixed;
+        bottom: 60px;
+        right: 20px;
+        width: 220px;
+        height: 60px;
+        border: none;
+        border-radius: 8px;
+        z-index: 2147483647;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      `;
+
+      document.body.appendChild(window.__utterRecognitionFrame);
+      console.log('Utter: Recognition frame created');
+    } catch (err) {
+      console.error('Utter: Failed to create recognition frame:', err);
+      showIndicator('Failed to start recognition', true);
+      cleanup();
+    }
+  }
+
+  function removeRecognitionFrame() {
+    if (window.__utterRecognitionFrame) {
+      window.__utterRecognitionFrame.remove();
+      window.__utterRecognitionFrame = null;
+    }
+    // Also remove any orphaned frames
+    const existingFrame = document.getElementById(IFRAME_ID);
+    if (existingFrame) {
+      existingFrame.remove();
+    }
+  }
+
+  function stopRecognition() {
+    // Send stop message to iframe
+    if (window.__utterRecognitionFrame?.contentWindow) {
+      window.__utterRecognitionFrame.contentWindow.postMessage({
+        target: 'utter-recognition-frame',
+        type: 'stop'
+      }, '*');
+    }
+
+    // Give iframe a moment to send final results, then cleanup
+    setTimeout(() => {
+      cleanup();
+    }, 100);
   }
 
   function isTextInputType(type) {
@@ -199,13 +241,6 @@
     }
   }
 
-  function updateIndicator(message) {
-    const indicator = document.getElementById(INDICATOR_ID);
-    if (indicator) {
-      indicator.textContent = message;
-    }
-  }
-
   function removeIndicator() {
     const indicator = document.getElementById(INDICATOR_ID);
     if (indicator) {
@@ -217,6 +252,7 @@
     window.__utterActive = false;
     window.__utterTargetElement = null;
     removeIndicator();
+    removeRecognitionFrame();
   }
 
   async function saveToHistory(text) {
