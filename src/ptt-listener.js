@@ -60,7 +60,8 @@
   function handleRecognitionMessage(message) {
     switch (message.type) {
       case 'recognition-started':
-        showIndicator('Listening...');
+        // Iframe shows its own "Listening..." status
+        removeIndicator(); // Remove any "Starting..." indicator
         break;
 
       case 'recognition-result':
@@ -68,20 +69,15 @@
           insertText(window.__utterTargetElement, message.finalTranscript);
           saveToHistory(message.finalTranscript);
         }
-        if (message.interimTranscript) {
-          updateIndicator(`Listening: ${message.interimTranscript}`);
-        } else {
-          updateIndicator('Listening...');
-        }
+        // Iframe shows interim transcription, no need for separate indicator
         break;
 
       case 'recognition-error':
-        if (message.recoverable) {
-          updateIndicator('Listening... (speak now)');
-        } else {
+        if (!message.recoverable) {
           showIndicator(`Error: ${message.error}`, true);
           cleanup();
         }
+        // Iframe shows recoverable errors
         break;
 
       case 'recognition-ended':
@@ -161,9 +157,8 @@
     }
 
     window.__utterTargetElement = targetElement;
-    showIndicator('Starting...');
 
-    // Create iframe for speech recognition
+    // Create iframe for speech recognition (iframe shows its own "Starting..." state)
     // This happens directly in response to keydown (user gesture)
     createRecognitionFrame();
   }
