@@ -14,9 +14,7 @@ export default defineConfig({
       polyfill: false,
     },
     rollupOptions: {
-      input: {
-        offscreen: 'src/offscreen.html',
-      },
+      input: {},
     },
   },
 });

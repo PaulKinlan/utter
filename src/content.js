@@ -1,5 +1,5 @@
 // Content script for speech recognition UI and text insertion
-// Speech recognition is handled by the offscreen document
+// Speech recognition is handled by the sidepanel
 
 (async function () {
   const INDICATOR_ID = 'utter-listening-indicator';
@@ -67,7 +67,7 @@
   // Request recognition start from background
   try {
     chrome.runtime.sendMessage({ type: 'start-recognition-request' });
-  } catch (err) {
+  } catch {
     showIndicator('Extension updated - reload page', true);
     return;
   }

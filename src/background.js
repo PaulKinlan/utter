@@ -1,49 +1,54 @@
 // Service worker for the extension
+/* global self */
 
 console.log('Utter service worker loaded');
-
-const OFFSCREEN_DOCUMENT_PATH = 'offscreen.html';
 
 // Track active recognition sessions by tab
 const activeSessions = new Map();
 
-// Create the offscreen document if it doesn't exist
-async function ensureOffscreenDocument() {
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
-  });
-
-  if (existingContexts.length > 0) {
-    console.log('Utter: Offscreen document already exists');
-    return;
-  }
-
-  console.log('Utter: Creating offscreen document');
-  await chrome.offscreen.createDocument({
-    url: OFFSCREEN_DOCUMENT_PATH,
-    reasons: [chrome.offscreen.Reason.USER_MEDIA],
-    justification: 'Speech recognition requires microphone access via getUserMedia'
-  });
-  console.log('Utter: Offscreen document created');
-}
-
-// Close the offscreen document
-async function closeOffscreenDocument() {
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
-  });
-
-  if (existingContexts.length > 0) {
-    console.log('Utter: Closing offscreen document');
-    await chrome.offscreen.closeDocument();
-  }
-}
+// Track if sidepanel is ready
+let sidepanelReady = false;
 
 // Generate a unique session ID
 function generateSessionId(tabId) {
   return `${tabId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Check if sidepanel is open
+async function isSidepanelOpen() {
+  try {
+    // Get all extension contexts
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['SIDE_PANEL']
+    });
+    return contexts.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// Wait for sidepanel to be ready
+function waitForSidepanelReady(timeout = 3000) {
+  return new Promise((resolve, reject) => {
+    if (sidepanelReady) {
+      resolve();
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Sidepanel did not become ready in time'));
+    }, timeout);
+
+    const checkReady = () => {
+      if (sidepanelReady) {
+        self.clearTimeout(timeoutId);
+        resolve();
+      } else {
+        self.setTimeout(checkReady, 50);
+      }
+    };
+    checkReady();
+  });
 }
 
 // Start recognition for a tab
@@ -61,13 +66,23 @@ async function startRecognitionForTab(tabId) {
   console.log('Utter: Starting recognition for tab', tabId, 'session', sessionId);
 
   try {
-    await ensureOffscreenDocument();
+    // Open the sidepanel if not already open
+    const isOpen = await isSidepanelOpen(tabId);
+    if (!isOpen) {
+      console.log('Utter: Opening sidepanel for tab', tabId);
+      sidepanelReady = false;
+      await chrome.sidePanel.open({ tabId });
 
-    // Tell offscreen document to start recognition
+      // Wait for sidepanel to signal it's ready
+      await waitForSidepanelReady();
+    }
+
+    // Tell sidepanel to start recognition
     const response = await chrome.runtime.sendMessage({
-      target: 'offscreen',
+      target: 'sidepanel',
       type: 'start-recognition',
-      sessionId
+      sessionId,
+      tabId
     });
 
     if (!response?.success) {
@@ -110,22 +125,12 @@ async function stopRecognitionForTab(tabId) {
 
   try {
     await chrome.runtime.sendMessage({
-      target: 'offscreen',
+      target: 'sidepanel',
       type: 'stop-recognition',
       sessionId
     });
   } catch (err) {
     console.error('Utter: Error stopping recognition:', err);
-  }
-
-  // Close offscreen document if no more active sessions
-  if (activeSessions.size === 0) {
-    // Delay slightly to allow final messages to be processed
-    setTimeout(async () => {
-      if (activeSessions.size === 0) {
-        await closeOffscreenDocument();
-      }
-    }, 1000);
   }
 }
 
@@ -161,11 +166,18 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
-// Handle messages from offscreen document and content scripts
+// Handle messages from sidepanel and content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Utter Background: Received message:', message, 'from:', sender);
 
-  // Handle settings request from offscreen document
+  // Sidepanel ready signal
+  if (message.type === 'sidepanel-ready') {
+    console.log('Utter Background: Sidepanel is ready');
+    sidepanelReady = true;
+    return;
+  }
+
+  // Handle settings request from sidepanel
   if (message.type === 'get-settings' && message.target === 'background') {
     chrome.storage.local.get([
       'selectedMicrophone',
@@ -197,7 +209,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
 
-  // Messages from offscreen document - forward to appropriate tab
+  // Stop request from sidepanel
+  if (message.type === 'stop-recognition-request-from-sidepanel') {
+    // Find the tab for this session and clean up
+    for (const [tabId, sessionId] of activeSessions.entries()) {
+      if (sessionId === message.sessionId) {
+        activeSessions.delete(tabId);
+        break;
+      }
+    }
+    return;
+  }
+
+  // Messages from sidepanel - forward to appropriate tab
   if (message.type === 'recognition-started' ||
       message.type === 'recognition-result' ||
       message.type === 'recognition-error' ||
@@ -223,15 +247,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           break;
         }
       }
-
-      // Close offscreen document if no more sessions
-      if (activeSessions.size === 0) {
-        setTimeout(async () => {
-          if (activeSessions.size === 0) {
-            await closeOffscreenDocument();
-          }
-        }, 1000);
-      }
     }
   }
 });
@@ -244,37 +259,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   }
 });
 
-// Forward storage changes to offscreen document
-chrome.storage.onChanged.addListener(async (changes, areaName) => {
-  if (areaName !== 'local') return;
-
-  // Only forward relevant settings
-  const relevantKeys = ['selectedMicrophone', 'soundFeedbackEnabled', 'audioVolume'];
-  const changedSettings = {};
-  let hasRelevantChanges = false;
-
-  for (const key of relevantKeys) {
-    if (changes[key]) {
-      changedSettings[key] = changes[key].newValue;
-      hasRelevantChanges = true;
-    }
-  }
-
-  if (!hasRelevantChanges) return;
-
-  // Check if offscreen document exists before sending
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
-  });
-
-  if (existingContexts.length > 0) {
-    chrome.runtime.sendMessage({
-      target: 'offscreen',
-      type: 'settings-updated',
-      settings: changedSettings
-    }).catch(err => {
-      console.warn('Utter Background: Could not forward settings to offscreen:', err);
+// Reset sidepanel ready state when sidepanel closes
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'sidepanel') {
+    port.onDisconnect.addListener(() => {
+      console.log('Utter Background: Sidepanel disconnected');
+      sidepanelReady = false;
     });
   }
 });

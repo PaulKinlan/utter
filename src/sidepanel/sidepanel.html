@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="sidepanel.css">
-  <title>Utter History</title>
+  <title>Utter</title>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>Voice Input History</h1>
+      <h1>Utter</h1>
       <div class="header-actions">
         <button id="settings" class="icon-button" title="Settings">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -24,6 +24,21 @@
         </button>
       </div>
     </header>
+
+    <!-- Recording Status Section -->
+    <div id="recording-section" class="recording-section hidden">
+      <div class="recording-indicator">
+        <div class="recording-pulse"></div>
+        <span class="recording-label">Listening...</span>
+      </div>
+      <div id="interim-text" class="interim-text"></div>
+      <button id="stop-recording" class="stop-button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="6" width="12" height="12" rx="2"/>
+        </svg>
+        Stop
+      </button>
+    </div>
 
     <div id="history-list" class="history-list">
       <p class="empty-state">No voice inputs yet. Use the keyboard shortcut to start dictating.</p>

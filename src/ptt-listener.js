@@ -1,6 +1,6 @@
 // Push-to-talk listener - runs on all pages
 // Listens for configured key combo to start/stop speech recognition
-// Speech recognition is handled by the offscreen document
+// Speech recognition is handled by the sidepanel
 
 (function () {
   const INDICATOR_ID = 'utter-listening-indicator';

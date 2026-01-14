@@ -205,3 +205,75 @@ h1 {
 .btn-danger:hover {
   background: #b91c1c;
 }
+
+/* Recording Section */
+.recording-section {
+  padding: 16px;
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border-bottom: 1px solid #fca5a5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.recording-section.hidden {
+  display: none;
+}
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.recording-pulse {
+  width: 12px;
+  height: 12px;
+  background: #dc2626;
+  border-radius: 50%;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+.recording-label {
+  font-weight: 600;
+  color: #991b1b;
+}
+
+.interim-text {
+  font-size: 14px;
+  color: #7f1d1d;
+  text-align: center;
+  min-height: 20px;
+  font-style: italic;
+}
+
+.stop-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.stop-button:hover {
+  background: #b91c1c;
+}

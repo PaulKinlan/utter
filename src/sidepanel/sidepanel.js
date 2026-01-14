@@ -1,28 +1,85 @@
-// Side panel script - displays voice input history
+// Side panel script - handles speech recognition and displays history
 
+// DOM elements
 const historyList = document.getElementById('history-list');
 const clearAllBtn = document.getElementById('clear-all');
 const settingsBtn = document.getElementById('settings');
+const recordingSection = document.getElementById('recording-section');
+const interimTextEl = document.getElementById('interim-text');
+const stopRecordingBtn = document.getElementById('stop-recording');
 
 let history = [];
 
-// Load history on init
+// Speech recognition state
+let recognition = null;
+let micStream = null;
+let currentSessionId = null;
+
+// Settings
+let settings = {
+  selectedMicrophone: '',
+  soundFeedbackEnabled: true,
+  audioVolume: 0.5
+};
+
+// Initialize
 init();
 
 async function init() {
+  await loadSettings();
   await loadHistory();
   renderHistory();
+  setupMessageListeners();
+  setupStorageListeners();
+  setupPortConnection();
 
-  // Listen for storage changes to update in real-time
+  // Signal to background that sidepanel is ready
+  chrome.runtime.sendMessage({ type: 'sidepanel-ready' }).catch(() => {
+    // Background might not be listening yet, that's ok
+  });
+}
+
+// Keep a port connection to background so it knows when we close
+function setupPortConnection() {
+  const port = chrome.runtime.connect({ name: 'sidepanel' });
+  port.onDisconnect.addListener(() => {
+    console.log('Utter Sidepanel: Disconnected from background');
+  });
+}
+
+async function loadSettings() {
+  try {
+    const result = await chrome.storage.local.get([
+      'selectedMicrophone',
+      'soundFeedbackEnabled',
+      'audioVolume'
+    ]);
+    settings.selectedMicrophone = result.selectedMicrophone || '';
+    settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
+    settings.audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
+  } catch (err) {
+    console.error('Utter Sidepanel: Error loading settings:', err);
+  }
+}
+
+function setupStorageListeners() {
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.utterHistory) {
       history = changes.utterHistory.newValue || [];
       renderHistory();
     }
+    if (changes.selectedMicrophone) {
+      settings.selectedMicrophone = changes.selectedMicrophone.newValue || '';
+    }
+    if (changes.soundFeedbackEnabled) {
+      settings.soundFeedbackEnabled = changes.soundFeedbackEnabled.newValue !== false;
+    }
+    if (changes.audioVolume) {
+      settings.audioVolume = changes.audioVolume.newValue !== undefined ? changes.audioVolume.newValue : 0.5;
+    }
   });
 
-  // Reload history when sidepanel becomes visible again
-  // This handles the case where voice input happens while sidepanel is closed/hidden
+  // Reload history when sidepanel becomes visible
   document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible') {
       await loadHistory();
@@ -31,6 +88,272 @@ async function init() {
   });
 }
 
+function setupMessageListeners() {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    console.log('Utter Sidepanel: Received message:', message);
+
+    if (message.target !== 'sidepanel') {
+      return;
+    }
+
+    switch (message.type) {
+      case 'start-recognition':
+        startRecognition(message.sessionId).then(result => {
+          sendResponse(result);
+        });
+        return true; // Async response
+
+      case 'stop-recognition':
+        stopRecognition(message.sessionId);
+        sendResponse({ success: true });
+        break;
+
+      default:
+        console.warn('Utter Sidepanel: Unknown message type:', message.type);
+    }
+  });
+}
+
+// Audio feedback
+function playSound(filename) {
+  if (!settings.soundFeedbackEnabled) return;
+
+  try {
+    const audioUrl = chrome.runtime.getURL(`audio/${filename}`);
+    const audio = new Audio(audioUrl);
+    audio.volume = settings.audioVolume;
+    audio.play().catch(err => {
+      console.warn('Utter Sidepanel: Could not play sound:', err);
+    });
+  } catch (err) {
+    console.warn('Utter Sidepanel: Could not play sound:', err);
+  }
+}
+
+// Get microphone access
+async function getMicrophoneAccess() {
+  if (settings.selectedMicrophone) {
+    try {
+      const constraints = {
+        audio: { deviceId: { exact: settings.selectedMicrophone } }
+      };
+      console.log('Utter Sidepanel: Requesting specific microphone:', settings.selectedMicrophone);
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      console.log('Utter Sidepanel: Microphone access granted');
+      return stream;
+    } catch (err) {
+      if (err.name === 'OverconstrainedError') {
+        console.warn('Utter Sidepanel: Selected microphone unavailable, falling back to default');
+      } else {
+        console.error('Utter Sidepanel: Could not get selected microphone:', err);
+        throw err;
+      }
+    }
+  }
+
+  // Use default microphone
+  console.log('Utter Sidepanel: Requesting default microphone');
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  console.log('Utter Sidepanel: Default microphone access granted');
+  return stream;
+}
+
+// Start speech recognition
+async function startRecognition(sessionId) {
+  console.log('Utter Sidepanel: Starting recognition for session:', sessionId);
+
+  // Stop any existing recognition
+  if (recognition) {
+    try {
+      recognition.stop();
+    } catch {
+      // Ignore
+    }
+    recognition = null;
+  }
+
+  // Clean up existing mic stream
+  if (micStream) {
+    micStream.getTracks().forEach(track => track.stop());
+    micStream = null;
+  }
+
+  currentSessionId = sessionId;
+
+  try {
+    // Get microphone access first
+    micStream = await getMicrophoneAccess();
+
+    // Create speech recognition
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      throw new Error('Speech Recognition API not supported');
+    }
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = navigator.language || 'en-US';
+
+    recognition.onstart = () => {
+      console.log('Utter Sidepanel: Speech recognition started');
+      playSound('beep.wav');
+      showRecordingUI();
+      sendToBackground({
+        type: 'recognition-started',
+        sessionId: currentSessionId
+      });
+    };
+
+    recognition.onresult = (event) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      // Update interim text in UI
+      if (interimTranscript) {
+        interimTextEl.textContent = interimTranscript;
+      }
+
+      sendToBackground({
+        type: 'recognition-result',
+        sessionId: currentSessionId,
+        finalTranscript,
+        interimTranscript
+      });
+    };
+
+    recognition.onerror = (event) => {
+      console.warn('Utter Sidepanel: Speech recognition error:', event.error, 'message:', event.message);
+
+      // Recoverable errors
+      if (event.error === 'no-speech' || event.error === 'aborted') {
+        sendToBackground({
+          type: 'recognition-error',
+          sessionId: currentSessionId,
+          error: event.error,
+          recoverable: true
+        });
+        return;
+      }
+
+      // Fatal errors
+      sendToBackground({
+        type: 'recognition-error',
+        sessionId: currentSessionId,
+        error: event.error,
+        recoverable: false
+      });
+
+      cleanup();
+    };
+
+    recognition.onend = () => {
+      console.log('Utter Sidepanel: Speech recognition ended');
+
+      // If we still have an active session, restart
+      if (recognition && currentSessionId === sessionId) {
+        console.log('Utter Sidepanel: Restarting recognition');
+        try {
+          recognition.start();
+        } catch (err) {
+          console.error('Utter Sidepanel: Failed to restart:', err);
+          sendToBackground({
+            type: 'recognition-ended',
+            sessionId: currentSessionId
+          });
+          cleanup();
+        }
+        return;
+      }
+
+      sendToBackground({
+        type: 'recognition-ended',
+        sessionId: currentSessionId
+      });
+      hideRecordingUI();
+    };
+
+    recognition.start();
+    return { success: true };
+  } catch (err) {
+    console.error('Utter Sidepanel: Failed to start recognition:', err);
+    cleanup();
+    return { success: false, error: err.message };
+  }
+}
+
+// Stop speech recognition
+function stopRecognition(sessionId) {
+  console.log('Utter Sidepanel: Stopping recognition for session:', sessionId);
+
+  if (currentSessionId !== sessionId) {
+    console.log('Utter Sidepanel: Session mismatch, ignoring stop request');
+    return;
+  }
+
+  if (recognition) {
+    const rec = recognition;
+    recognition = null;
+    currentSessionId = null;
+    try {
+      rec.stop();
+    } catch {
+      // Ignore
+    }
+  }
+
+  playSound('boop.wav');
+  cleanup();
+}
+
+function cleanup() {
+  if (micStream) {
+    micStream.getTracks().forEach(track => track.stop());
+    micStream = null;
+  }
+  recognition = null;
+  currentSessionId = null;
+  hideRecordingUI();
+}
+
+function showRecordingUI() {
+  recordingSection.classList.remove('hidden');
+  interimTextEl.textContent = '';
+}
+
+function hideRecordingUI() {
+  recordingSection.classList.add('hidden');
+  interimTextEl.textContent = '';
+}
+
+function sendToBackground(message) {
+  chrome.runtime.sendMessage(message).catch(err => {
+    console.warn('Utter Sidepanel: Could not send message to background:', err);
+  });
+}
+
+// Stop button handler
+stopRecordingBtn.addEventListener('click', () => {
+  if (currentSessionId) {
+    sendToBackground({
+      type: 'stop-recognition-request-from-sidepanel',
+      sessionId: currentSessionId
+    });
+    stopRecognition(currentSessionId);
+  }
+});
+
+// History functions
 async function loadHistory() {
   try {
     const result = await chrome.storage.local.get(['utterHistory']);
@@ -42,7 +365,6 @@ async function loadHistory() {
 }
 
 function renderHistory() {
-  // Clear existing content
   while (historyList.firstChild) {
     historyList.removeChild(historyList.firstChild);
   }
@@ -55,7 +377,6 @@ function renderHistory() {
     return;
   }
 
-  // Render items in reverse chronological order
   const sortedHistory = [...history].sort((a, b) => b.timestamp - a.timestamp);
 
   sortedHistory.forEach((item) => {
@@ -85,7 +406,6 @@ function createHistoryItem(item) {
   div.className = 'history-item';
   div.dataset.id = item.id;
 
-  // Header with meta info and delete button
   const header = document.createElement('div');
   header.className = 'history-item-header';
 
@@ -112,7 +432,6 @@ function createHistoryItem(item) {
 
   header.appendChild(meta);
 
-  // Delete button
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'icon-button danger history-item-delete';
   deleteBtn.title = 'Delete this entry';
@@ -122,7 +441,6 @@ function createHistoryItem(item) {
 
   div.appendChild(header);
 
-  // Text content
   const text = document.createElement('p');
   text.className = 'history-item-text';
   text.textContent = item.text;
@@ -182,7 +500,6 @@ async function saveHistory() {
   }
 }
 
-// Clear all button with confirmation
 clearAllBtn.addEventListener('click', () => {
   if (history.length === 0) return;
 
@@ -194,7 +511,6 @@ clearAllBtn.addEventListener('click', () => {
 });
 
 function showConfirmDialog(title, message, onConfirm) {
-  // Create dialog
   const dialog = document.createElement('div');
   dialog.className = 'confirm-dialog';
 
@@ -231,7 +547,6 @@ function showConfirmDialog(title, message, onConfirm) {
   dialog.appendChild(content);
   document.body.appendChild(dialog);
 
-  // Close on backdrop click
   dialog.addEventListener('click', (e) => {
     if (e.target === dialog) {
       dialog.remove();
@@ -239,7 +554,8 @@ function showConfirmDialog(title, message, onConfirm) {
   });
 }
 
-// Settings button opens options page
 settingsBtn.addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
+
+console.log('Utter Sidepanel: Loaded and ready');
