@@ -114,3 +114,188 @@ Utter is a Chrome extension that provides a global hotkey to invoke the Web Spee
   ]
 }
 ```
+
+---
+
+## Architecture
+
+### Iframe-Based Speech Recognition Architecture
+
+Utter uses an innovative **iframe-based architecture** for speech recognition that enables voice-to-text input on any webpage without requiring the page itself to have microphone permissions. This approach is unified across both hotkey (toggle) and push-to-talk modes.
+
+#### Why This Architecture Works
+
+**The Key Insight:** An iframe with `allow="microphone"` attribute can request and use microphone access independently of the host page's permissions. This provides:
+
+1. **Universal Microphone Access** - The extension's iframe has its own permission context, so speech recognition works on any page regardless of whether the page allows microphone access
+2. **Isolation from Page Scripts** - Speech recognition runs in a sandboxed iframe context, preventing conflicts with page JavaScript
+3. **No Background Page Required** - Unlike offscreen documents or background workers, the iframe runs directly in the page context with full Web Speech API access
+4. **Lightweight & Fast** - The iframe is created on-demand and destroyed after use, with minimal resource overhead
+
+#### Component Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Chrome Extension                                               │
+├─────────────────────────────────────────────────────────────────┤
+│  background.js (Service Worker)                                 │
+│  - Receives hotkey command via chrome.commands                  │
+│  - Injects content.js into active tab                           │
+├─────────────────────────────────────────────────────────────────┤
+│  ptt-listener.js (Persistent Content Script)                    │
+│  - Runs on all pages via manifest content_scripts               │
+│  - Listens for PTT key combo (keydown/keyup)                    │
+│  - Creates/destroys recognition iframe                          │
+│  - Inserts transcribed text into focused input                  │
+├─────────────────────────────────────────────────────────────────┤
+│  content.js (Injected Content Script)                           │
+│  - Injected on hotkey press                                     │
+│  - Creates/destroys recognition iframe                          │
+│  - Handles toggle on/off behavior                               │
+│  - Inserts transcribed text into focused input                  │
+├─────────────────────────────────────────────────────────────────┤
+│  recognition-frame/ (Isolated Iframe)                           │
+│  ├── recognition-frame.html                                     │
+│  └── recognition-frame.js                                       │
+│  - Has allow="microphone" attribute                             │
+│  - Runs Web Speech Recognition API                              │
+│  - Manages microphone stream                                    │
+│  - Sends results via postMessage                                │
+│  - Displays visual feedback (listening status, interim text)    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### Message Flow
+
+**From Iframe to Parent (content.js / ptt-listener.js):**
+```javascript
+{
+  source: 'utter-recognition-frame',
+  type: 'recognition-started' | 'recognition-result' | 'recognition-error' | 'recognition-ended',
+  finalTranscript: 'completed text',
+  interimTranscript: 'partial text...',
+  error: 'error-name',
+  recoverable: boolean
+}
+```
+
+**From Parent to Iframe:**
+```javascript
+{
+  target: 'utter-recognition-frame',
+  type: 'stop'
+}
+```
+
+#### Hotkey Mode Flow
+
+1. User presses `Ctrl+Shift+U` (or `Cmd+Shift+U` on Mac)
+2. Chrome dispatches command to service worker (`background.js`)
+3. Service worker injects `content.js` via `chrome.scripting.executeScript()`
+4. `content.js` validates focus is on a text input
+5. Creates iframe pointing to `recognition-frame.html` with `allow="microphone"`
+6. Iframe initializes speech recognition and starts listening
+7. User speaks; interim results display in iframe
+8. Final transcripts sent via `postMessage` to `content.js`
+9. `content.js` inserts text into the focused input
+10. Pressing hotkey again sends `stop` message and removes iframe
+
+#### Push-to-Talk Mode Flow
+
+1. `ptt-listener.js` runs persistently on all pages
+2. User holds configured key combo (e.g., `Alt+.`)
+3. On `keydown`, validates focus is on a text input
+4. Creates iframe with `allow="microphone"` attribute
+5. Iframe initializes speech recognition and starts listening
+6. User speaks while holding keys; interim results display in iframe
+7. Final transcripts sent via `postMessage` to `ptt-listener.js`
+8. Text inserted into focused input in real-time
+9. On `keyup` (any combo key released), sends `stop` message
+10. Iframe sends any pending interim text as final, then cleanup
+
+#### Critical Implementation Details
+
+**Iframe Creation (in both content.js and ptt-listener.js):**
+```javascript
+const frameUrl = chrome.runtime.getURL('recognition-frame/recognition-frame.html');
+const iframe = document.createElement('iframe');
+iframe.src = frameUrl;
+iframe.allow = 'microphone';  // KEY: Grants independent microphone access
+iframe.style.cssText = `
+  position: fixed;
+  bottom: 60px;
+  right: 20px;
+  width: 220px;
+  height: 60px;
+  border: none;
+  border-radius: 8px;
+  z-index: 2147483647;
+`;
+document.body.appendChild(iframe);
+```
+
+**Speech Recognition in Iframe (recognition-frame.js):**
+```javascript
+// Get microphone access directly in iframe context
+const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+// Initialize Web Speech API
+const recognition = new webkitSpeechRecognition();
+recognition.continuous = true;
+recognition.interimResults = true;
+
+recognition.onresult = (event) => {
+  // Send results to parent
+  window.parent.postMessage({
+    source: 'utter-recognition-frame',
+    type: 'recognition-result',
+    finalTranscript: '...',
+    interimTranscript: '...'
+  }, '*');
+};
+
+recognition.start();
+```
+
+**Pending Interim Text on Stop:**
+When PTT key is released, any pending interim transcript is sent as final to avoid losing spoken words that haven't been finalized by the speech recognition API:
+
+```javascript
+function stopRecognition() {
+  // Send any pending interim text as final
+  if (lastInterimTranscript) {
+    sendToParent({
+      type: 'recognition-result',
+      finalTranscript: lastInterimTranscript,
+      interimTranscript: ''
+    });
+    lastInterimTranscript = '';
+  }
+  // ... cleanup
+}
+```
+
+#### Why Not Other Approaches?
+
+| Approach | Problem |
+|----------|---------|
+| Offscreen Document | Cannot access Web Speech API (headless context) |
+| Background Service Worker | No DOM, no Web Speech API |
+| Side Panel | Requires panel to be open; clunky UX |
+| Content Script Directly | Page's CSP may block microphone; conflicts with page scripts |
+| **Iframe (current)** | ✅ Works everywhere, isolated, lightweight |
+
+#### Web Accessible Resources
+
+The manifest must expose the iframe resources:
+```json
+"web_accessible_resources": [{
+  "matches": ["<all_urls>"],
+  "resources": [
+    "recognition-frame/recognition-frame.html",
+    "recognition-frame/recognition-frame.js",
+    "audio/beep.wav",
+    "audio/boop.wav"
+  ]
+}]
+```

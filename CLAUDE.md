@@ -79,6 +79,39 @@ Run `npm run generate-icons` to create placeholder icons if missing.
 - Prefer async/await over callbacks for Chrome APIs
 - All Chrome API calls should handle errors appropriately
 
+### Speech Recognition Architecture (DO NOT REGRESS)
+
+The extension uses an **iframe-based architecture** for speech recognition. This design is critical and must not be changed without understanding why it exists.
+
+**Why Iframes:**
+- An iframe with `allow="microphone"` has independent microphone permission, working on ANY page regardless of the page's CSP or permissions
+- The Web Speech API runs in an isolated context, preventing conflicts with page scripts
+- Works without requiring sidepanel to be open or offscreen documents (which lack DOM access)
+
+**Key Components:**
+1. `ptt-listener.js` - Persistent content script for push-to-talk mode (keydown/keyup)
+2. `content.js` - Injected script for hotkey toggle mode
+3. `recognition-frame/` - Iframe that runs Web Speech API with its own microphone access
+
+**Critical Implementation Rules:**
+- ALWAYS create iframe with `allow="microphone"` attribute
+- ALWAYS use `chrome.runtime.getURL()` to get the iframe src
+- NEVER try to run speech recognition directly in content scripts
+- NEVER use offscreen documents for speech recognition (no DOM access)
+- Communication between iframe and content scripts uses `postMessage`
+- When stopping recognition, ALWAYS send pending interim text as final (prevents word loss)
+
+**Message Protocol:**
+```javascript
+// Iframe → Parent
+{ source: 'utter-recognition-frame', type: 'recognition-result', finalTranscript, interimTranscript }
+
+// Parent → Iframe
+{ target: 'utter-recognition-frame', type: 'stop' }
+```
+
+See PRODUCT_REQUIREMENTS.md "Architecture" section for full details.
+
 ## Source Control
 
 - **Always commit automatically** when you complete a task or logical unit of work - do not ask for permission
