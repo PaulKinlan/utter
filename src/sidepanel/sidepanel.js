@@ -14,6 +14,7 @@ let history = [];
 let recognition = null;
 let micStream = null;
 let currentSessionId = null;
+let lastInterimTranscript = ''; // Track last interim text for when recognition stops
 
 // Settings
 let settings = {
@@ -179,6 +180,7 @@ async function startRecognition(sessionId) {
   }
 
   currentSessionId = sessionId;
+  lastInterimTranscript = ''; // Clear any stale interim text from previous session
 
   try {
     // Get microphone access first
@@ -217,6 +219,15 @@ async function startRecognition(sessionId) {
         } else {
           interimTranscript += transcript;
         }
+      }
+
+      // Track last interim text for when recognition stops
+      if (interimTranscript) {
+        lastInterimTranscript = interimTranscript;
+      }
+      // Clear interim tracking when we get a final result
+      if (finalTranscript) {
+        lastInterimTranscript = '';
       }
 
       // Update interim text in UI
@@ -301,6 +312,18 @@ function stopRecognition(sessionId) {
     return;
   }
 
+  // If there's pending interim text, send it as a final result before stopping
+  if (lastInterimTranscript && currentSessionId) {
+    console.log('Utter Sidepanel: Sending pending interim text as final:', lastInterimTranscript);
+    sendToBackground({
+      type: 'recognition-result',
+      sessionId: currentSessionId,
+      finalTranscript: lastInterimTranscript,
+      interimTranscript: ''
+    });
+    lastInterimTranscript = '';
+  }
+
   if (recognition) {
     const rec = recognition;
     recognition = null;
@@ -323,6 +346,7 @@ function cleanup() {
   }
   recognition = null;
   currentSessionId = null;
+  lastInterimTranscript = '';
   hideRecordingUI();
 }
 

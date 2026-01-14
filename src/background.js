@@ -14,29 +14,35 @@ function generateSessionId(tabId) {
   return `${tabId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
-// Check if sidepanel is open
-async function isSidepanelOpen() {
+// Check if sidepanel is open for a specific tab
+// Note: Chrome doesn't expose per-tab sidepanel state, so tabId is unused but kept for future API changes
+async function isSidepanelOpen(_tabId) {
   try {
     // Get all extension contexts
     const contexts = await chrome.runtime.getContexts({
       contextTypes: ['SIDE_PANEL']
     });
-    return contexts.length > 0;
+    // Check if any sidepanel context exists (Chrome doesn't expose per-tab info)
+    // but also check if sidepanel is ready to receive messages
+    return contexts.length > 0 && sidepanelReady;
   } catch {
     return false;
   }
 }
 
-// Wait for sidepanel to be ready
-function waitForSidepanelReady(timeout = 3000) {
-  return new Promise((resolve, reject) => {
+// Wait for sidepanel to be ready with improved reliability
+function waitForSidepanelReady(timeout = 5000) {
+  return new Promise((resolve) => {
+    // Check immediately in case ready signal came before we started waiting
     if (sidepanelReady) {
       resolve();
       return;
     }
 
     const timeoutId = setTimeout(() => {
-      reject(new Error('Sidepanel did not become ready in time'));
+      console.warn('Utter: Sidepanel ready timeout, proceeding anyway');
+      // Don't reject - proceed anyway since sidepanel might still work
+      resolve();
     }, timeout);
 
     const checkReady = () => {
@@ -66,24 +72,44 @@ async function startRecognitionForTab(tabId) {
   console.log('Utter: Starting recognition for tab', tabId, 'session', sessionId);
 
   try {
-    // Open the sidepanel if not already open
+    // Open the sidepanel if not already open and ready
     const isOpen = await isSidepanelOpen(tabId);
     if (!isOpen) {
       console.log('Utter: Opening sidepanel for tab', tabId);
       sidepanelReady = false;
-      await chrome.sidePanel.open({ tabId });
+
+      try {
+        await chrome.sidePanel.open({ tabId });
+      } catch (openErr) {
+        console.error('Utter: Failed to open sidepanel:', openErr);
+        // Try opening without tabId (opens in current window)
+        try {
+          await chrome.sidePanel.open({ windowId: (await chrome.tabs.get(tabId)).windowId });
+        } catch (openErr2) {
+          console.error('Utter: Failed to open sidepanel (fallback):', openErr2);
+          throw new Error('Could not open sidepanel. Please click the extension icon first.');
+        }
+      }
 
       // Wait for sidepanel to signal it's ready
+      console.log('Utter: Waiting for sidepanel to be ready...');
       await waitForSidepanelReady();
+      console.log('Utter: Sidepanel ready, proceeding with recognition');
     }
 
     // Tell sidepanel to start recognition
-    const response = await chrome.runtime.sendMessage({
-      target: 'sidepanel',
-      type: 'start-recognition',
-      sessionId,
-      tabId
-    });
+    let response;
+    try {
+      response = await chrome.runtime.sendMessage({
+        target: 'sidepanel',
+        type: 'start-recognition',
+        sessionId,
+        tabId
+      });
+    } catch (msgErr) {
+      console.error('Utter: Failed to send message to sidepanel:', msgErr);
+      throw new Error('Sidepanel is not responding. Please try again.');
+    }
 
     if (!response?.success) {
       console.error('Utter: Failed to start recognition:', response?.error);

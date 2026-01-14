@@ -114,22 +114,46 @@
 
   function insertText(element, text) {
     if (!element) {
-      console.error('Utter: No target element');
+      console.warn('Utter: No target element for text insertion');
       return;
     }
 
-    console.log('Utter: insertText called with:', text, 'into', element.tagName);
+    if (!text) {
+      console.warn('Utter: Empty text, skipping insertion');
+      return;
+    }
 
-    // Re-focus the element to ensure we can insert
-    element.focus();
+    console.log('Utter: Inserting text:', text, 'into element:', element.tagName);
+
+    // Check if element is still in the DOM
+    if (!document.body.contains(element)) {
+      console.warn('Utter: Target element no longer in DOM');
+      return;
+    }
 
     try {
+      // Re-focus the element to ensure we can insert
+      element.focus();
+
       if (element.isContentEditable) {
-        document.execCommand('insertText', false, text);
-        console.log('Utter: Used execCommand for contenteditable');
+        // For contenteditable elements
+        const success = document.execCommand('insertText', false, text);
+        if (!success) {
+          console.warn('Utter: execCommand failed, trying fallback');
+          // Fallback: insert at selection
+          const selection = window.getSelection();
+          if (selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(document.createTextNode(text));
+            range.collapse(false);
+          }
+        }
+        console.log('Utter: Inserted into contenteditable');
       } else {
-        const start = element.selectionStart ?? element.value.length;
-        const end = element.selectionEnd ?? element.value.length;
+        // For input/textarea elements
+        const start = element.selectionStart ?? element.value?.length ?? 0;
+        const end = element.selectionEnd ?? element.value?.length ?? 0;
         const value = element.value || '';
 
         element.value = value.substring(0, start) + text + value.substring(end);
@@ -137,8 +161,7 @@
 
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
-
-        console.log('Utter: Inserted into input/textarea, new value:', element.value);
+        console.log('Utter: Inserted into input/textarea');
       }
     } catch (err) {
       console.error('Utter: Error inserting text:', err);
