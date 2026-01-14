@@ -58,6 +58,8 @@ function waitForSidepanelReady(timeout = 5000) {
 }
 
 // Start recognition for a tab
+// The sidepanel should already be open (opened in command handler or by user clicking icon)
+// For PTT mode, the user must have the sidepanel open first since we can't open it from content script gestures
 async function startRecognitionForTab(tabId) {
   // Check if already running for this tab
   if (activeSessions.has(tabId)) {
@@ -72,29 +74,22 @@ async function startRecognitionForTab(tabId) {
   console.log('Utter: Starting recognition for tab', tabId, 'session', sessionId);
 
   try {
-    // Open the sidepanel if not already open and ready
+    // Check if sidepanel is open - it should have been opened in the command handler
+    // or by the user clicking the extension icon (required for PTT mode)
     const isOpen = await isSidepanelOpen(tabId);
     if (!isOpen) {
-      console.log('Utter: Opening sidepanel for tab', tabId);
-      sidepanelReady = false;
+      // Sidepanel not open - this happens with PTT mode since content script gestures
+      // can't be used to open the sidepanel (Chrome API restriction)
+      console.log('Utter: Sidepanel not open, waiting for it to be ready...');
 
-      try {
-        await chrome.sidePanel.open({ tabId });
-      } catch (openErr) {
-        console.error('Utter: Failed to open sidepanel:', openErr);
-        // Try opening without tabId (opens in current window)
-        try {
-          await chrome.sidePanel.open({ windowId: (await chrome.tabs.get(tabId)).windowId });
-        } catch (openErr2) {
-          console.error('Utter: Failed to open sidepanel (fallback):', openErr2);
-          throw new Error('Could not open sidepanel. Please click the extension icon first.');
-        }
+      // Wait a short time for the sidepanel to initialize (it may have just been opened)
+      await waitForSidepanelReady(3000);
+
+      // Check again
+      const isOpenNow = await isSidepanelOpen(tabId);
+      if (!isOpenNow) {
+        throw new Error('Please click the Utter extension icon first to open the sidepanel');
       }
-
-      // Wait for sidepanel to signal it's ready
-      console.log('Utter: Waiting for sidepanel to be ready...');
-      await waitForSidepanelReady();
-      console.log('Utter: Sidepanel ready, proceeding with recognition');
     }
 
     // Tell sidepanel to start recognition
@@ -179,7 +174,26 @@ chrome.commands.onCommand.addListener(async (command) => {
       return;
     }
 
-    // Inject the content script first (for UI and text insertion)
+    // Open sidepanel FIRST while we still have user gesture context
+    // This MUST happen synchronously in response to the command
+    const isOpen = await isSidepanelOpen(tab.id);
+    if (!isOpen) {
+      console.log('Utter: Opening sidepanel in command handler (user gesture context)');
+      sidepanelReady = false;
+      try {
+        await chrome.sidePanel.open({ tabId: tab.id });
+      } catch (openErr) {
+        console.error('Utter: Failed to open sidepanel:', openErr);
+        // Try with windowId as fallback
+        try {
+          await chrome.sidePanel.open({ windowId: tab.windowId });
+        } catch (openErr2) {
+          console.error('Utter: Failed to open sidepanel (fallback):', openErr2);
+        }
+      }
+    }
+
+    // Inject the content script (for UI and text insertion)
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
