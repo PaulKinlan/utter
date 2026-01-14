@@ -6,11 +6,50 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Utter is a Chrome extension that provides a global hotkey to invoke the Web Speech Recognition API for voice-to-text input. Targets the latest stable Chrome version using Manifest V3.
 
-## Documentation Workflow
+## Documentation Workflow (MANDATORY)
 
-When adding new features:
+When making ANY changes to the extension, you MUST update the relevant documentation files. This is not optional.
+
+### When Adding New Features:
 1. Update `PRODUCT_REQUIREMENTS.md` with the feature description, user flow, and technical requirements
-2. Keep the requirements file in sync with implemented functionality
+2. Update `CHROME_WEB_STORE.md` with:
+   - New feature description in the detailed description
+   - Version history entry
+   - Any new permission justifications if permissions changed
+3. Update `PRIVACY.md` if the feature affects:
+   - Data collection or storage
+   - New permissions
+   - Third-party service usage
+
+### When Changing Permissions:
+1. Update `manifest.json` with the new permission
+2. Update `CHROME_WEB_STORE.md` "Permissions Justification" section with a clear explanation of why the permission is needed
+3. Update `PRIVACY.md` "Permissions Explained" table
+
+### When Releasing a New Version:
+1. Update version number in `manifest.json`
+2. Add version history entry in `CHROME_WEB_STORE.md`
+3. Review all sections in `CHROME_WEB_STORE.md` for accuracy
+
+### Key Documentation Files:
+
+| File | Purpose | When to Update |
+|------|---------|----------------|
+| `PRODUCT_REQUIREMENTS.md` | Technical requirements and feature specifications | When features change |
+| `CHROME_WEB_STORE.md` | Chrome Web Store listing content (descriptions, permissions, screenshots) | When features, permissions, or version changes |
+| `PRIVACY.md` | Privacy policy for users | When data handling or permissions change |
+
+### Chrome Web Store Documentation (`CHROME_WEB_STORE.md`)
+
+This file contains EVERYTHING needed for the Chrome Web Store listing:
+- Extension name and descriptions (short and detailed)
+- Permission justifications (copy directly into CWS dashboard)
+- Privacy practice disclosures
+- Screenshot requirements
+- Version history
+- Review notes for the CWS team
+
+**This file must accurately reflect the current state of the extension at all times.**
 
 ## Build Commands
 
