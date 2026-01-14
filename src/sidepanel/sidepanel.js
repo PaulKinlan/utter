@@ -7,8 +7,13 @@ const settingsBtn = document.getElementById('settings');
 const recordingSection = document.getElementById('recording-section');
 const interimTextEl = document.getElementById('interim-text');
 const stopRecordingBtn = document.getElementById('stop-recording');
+const shortcutsContainer = document.getElementById('shortcuts-container');
 
 let history = [];
+
+// Shortcuts info
+let toggleShortcut = null;
+let pttKeyCombo = null;
 
 // Speech recognition state
 let recognition = null;
@@ -28,6 +33,7 @@ init();
 
 async function init() {
   await loadSettings();
+  await loadShortcuts();
   await loadHistory();
   renderHistory();
   setupMessageListeners();
@@ -63,6 +69,25 @@ async function loadSettings() {
   }
 }
 
+async function loadShortcuts() {
+  try {
+    // Get the toggle shortcut from Chrome commands API
+    const commands = await chrome.commands.getAll();
+    const toggleCommand = commands.find(cmd => cmd.name === 'toggle-voice-input');
+    if (toggleCommand?.shortcut) {
+      toggleShortcut = toggleCommand.shortcut;
+    }
+
+    // Get push-to-talk key combo from storage
+    const result = await chrome.storage.local.get(['pttKeyCombo']);
+    if (result.pttKeyCombo) {
+      pttKeyCombo = result.pttKeyCombo;
+    }
+  } catch (err) {
+    console.error('Utter Sidepanel: Error loading shortcuts:', err);
+  }
+}
+
 function setupStorageListeners() {
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.utterHistory) {
@@ -77,6 +102,13 @@ function setupStorageListeners() {
     }
     if (changes.audioVolume) {
       settings.audioVolume = changes.audioVolume.newValue !== undefined ? changes.audioVolume.newValue : 0.5;
+    }
+    if (changes.pttKeyCombo) {
+      pttKeyCombo = changes.pttKeyCombo.newValue || null;
+      // Re-render if showing empty state to update shortcuts display
+      if (history.length === 0) {
+        renderHistory();
+      }
     }
   });
 
@@ -394,9 +426,26 @@ function renderHistory() {
   }
 
   if (history.length === 0) {
-    const emptyState = document.createElement('p');
+    const emptyState = document.createElement('div');
     emptyState.className = 'empty-state';
-    emptyState.textContent = 'No voice inputs yet. Use the keyboard shortcut to start dictating.';
+    emptyState.id = 'empty-state';
+
+    const title = document.createElement('p');
+    title.className = 'empty-state-title';
+    title.textContent = 'No voice inputs yet';
+    emptyState.appendChild(title);
+
+    const subtitle = document.createElement('p');
+    subtitle.className = 'empty-state-subtitle';
+    subtitle.textContent = 'Use a keyboard shortcut to start dictating';
+    emptyState.appendChild(subtitle);
+
+    const shortcuts = document.createElement('div');
+    shortcuts.className = 'shortcuts-container';
+    shortcuts.id = 'shortcuts-container';
+    renderShortcuts(shortcuts);
+    emptyState.appendChild(shortcuts);
+
     historyList.appendChild(emptyState);
     return;
   }
@@ -407,6 +456,82 @@ function renderHistory() {
     const itemEl = createHistoryItem(item);
     historyList.appendChild(itemEl);
   });
+}
+
+function renderShortcuts(container) {
+  // Toggle shortcut
+  if (toggleShortcut) {
+    const toggleItem = createShortcutItem('Toggle', toggleShortcut);
+    container.appendChild(toggleItem);
+  }
+
+  // Push-to-talk shortcut
+  if (pttKeyCombo) {
+    const pttDisplay = formatKeyCombo(pttKeyCombo);
+    const pttItem = createShortcutItem('Push-to-Talk', pttDisplay);
+    container.appendChild(pttItem);
+  }
+
+  // If neither is set, show a hint
+  if (!toggleShortcut && !pttKeyCombo) {
+    const hint = document.createElement('p');
+    hint.className = 'shortcut-not-set';
+    hint.textContent = 'Configure shortcuts in Settings';
+    container.appendChild(hint);
+  }
+}
+
+function createShortcutItem(label, shortcutString) {
+  const item = document.createElement('div');
+  item.className = 'shortcut-item';
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'shortcut-label';
+  labelEl.textContent = label;
+  item.appendChild(labelEl);
+
+  const keysContainer = document.createElement('div');
+  keysContainer.className = 'shortcut-keys';
+
+  // Parse the shortcut string and create key elements
+  // Chrome uses formats like "Ctrl+Shift+U" or "⌘+Shift+U"
+  const keys = shortcutString.split('+');
+  keys.forEach((key, index) => {
+    if (index > 0) {
+      const separator = document.createElement('span');
+      separator.className = 'key-separator';
+      separator.textContent = '+';
+      keysContainer.appendChild(separator);
+    }
+
+    const keyEl = document.createElement('span');
+    keyEl.className = 'key';
+    keyEl.textContent = key.trim();
+    keysContainer.appendChild(keyEl);
+  });
+
+  item.appendChild(keysContainer);
+  return item;
+}
+
+function formatKeyCombo(combo) {
+  const parts = [];
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+
+  if (combo.ctrlKey) parts.push('Ctrl');
+  if (combo.altKey) parts.push(isMac ? 'Option' : 'Alt');
+  if (combo.shiftKey) parts.push('Shift');
+  if (combo.metaKey) parts.push(isMac ? 'Cmd' : 'Win');
+
+  // Format the key nicely
+  let keyDisplay = combo.key;
+  if (combo.key === ' ') keyDisplay = 'Space';
+  else if (combo.key === '.') keyDisplay = '.';
+  else if (combo.key.length === 1) keyDisplay = combo.key.toUpperCase();
+
+  parts.push(keyDisplay);
+
+  return parts.join('+');
 }
 
 function createDeleteIcon() {
