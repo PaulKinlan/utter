@@ -24,6 +24,8 @@ Utter is a lightweight Chrome extension that brings voice-to-text input to any w
 
 • **Voice Input History** — Access your transcription history in the side panel. Review past inputs with timestamps and source URLs, and easily delete entries you no longer need.
 
+• **Audio Recording & Playback** — Automatically records audio alongside your transcriptions. Listen back to your recordings with an inline audio visualizer, verify transcription accuracy, and download both text and audio files.
+
 • **Microphone Selection** — Choose which microphone to use in the options page. Great for users with multiple audio devices.
 
 • **Visual Feedback** — A small floating indicator shows when Utter is listening and displays your speech in real-time as it's transcribed.
@@ -102,7 +104,8 @@ We use `activeTab` instead of broader host permissions to minimize access — th
 1. Activation mode preference (toggle vs push-to-talk)
 2. Custom push-to-talk key combination
 3. Selected microphone device ID
-4. Voice input history (transcriptions, timestamps, page URLs)
+4. Voice input history (transcriptions, timestamps, page URLs, and audio recordings)
+5. Audio recordings stored as WebM files (base64 encoded) for playback
 
 All data is stored locally using `chrome.storage.local` and is never transmitted to external servers.
 
@@ -176,8 +179,9 @@ All icons should be located in `src/icons/`.
 Required screenshots to create:
 1. **Hero shot** — Extension in action, showing the listening indicator while text appears in a text field
 2. **Push-to-talk mode** — Options page showing the push-to-talk configuration
-3. **History panel** — Side panel showing voice input history
-4. **Options page** — Full options page with microphone selection
+3. **History panel with audio player** — Side panel showing voice input history with inline audio player and visualizer
+4. **Audio playback** — Close-up of audio player showing frequency visualizer and playback controls
+5. **Options page** — Full options page with microphone selection
 
 ### Promotional Images (Optional)
 
@@ -188,6 +192,13 @@ Required screenshots to create:
 ---
 
 ## Version History
+
+### v1.1.0 (Current)
+- **NEW:** Audio recording and playback — Automatically record audio during voice input sessions
+- **NEW:** Inline audio player with real-time frequency visualizer
+- **NEW:** Download transcriptions as text files
+- **NEW:** Download audio recordings as WebM files
+- Enhanced history panel with audio playback controls
 
 ### v1.0.0
 - Initial release

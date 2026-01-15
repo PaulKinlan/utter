@@ -67,7 +67,8 @@
       case 'recognition-result':
         if (message.finalTranscript) {
           insertText(window.__utterTargetElement, message.finalTranscript);
-          saveToHistory(message.finalTranscript);
+          // Accumulate text for this session
+          window.__utterSessionText = (window.__utterSessionText || '') + message.finalTranscript;
         }
         // Iframe shows interim transcription, no need for separate indicator
         break;
@@ -81,6 +82,10 @@
         break;
 
       case 'recognition-ended':
+        // Save accumulated text with audio data
+        if (window.__utterSessionText) {
+          saveToHistory(window.__utterSessionText, message.audioDataUrl);
+        }
         cleanup();
         break;
     }
@@ -157,6 +162,7 @@
     }
 
     window.__utterTargetElement = targetElement;
+    window.__utterSessionText = ''; // Accumulate all text from this session
 
     // Create iframe for speech recognition (iframe shows its own "Starting..." state)
     // This happens directly in response to keydown (user gesture)
@@ -330,27 +336,35 @@
 
   function cleanup() {
     window.__utterTargetElement = null;
+    window.__utterSessionText = '';
     removeIndicator();
     removeRecognitionFrame();
   }
 
-  async function saveToHistory(text) {
+  async function saveToHistory(text, audioDataUrl = null) {
     if (!isContextValid()) return;
     try {
       const result = await chrome.storage.local.get(['utterHistory']);
       const history = result.utterHistory || [];
 
-      history.push({
+      const entry = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         text: text,
         timestamp: Date.now(),
         url: window.location.href
-      });
+      };
+
+      // Add audio data if available
+      if (audioDataUrl) {
+        entry.audioDataUrl = audioDataUrl;
+      }
+
+      history.push(entry);
 
       const trimmedHistory = history.slice(-500);
 
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
-      console.log('Utter PTT: Saved to history');
+      console.log('Utter PTT: Saved to history with audio:', !!audioDataUrl);
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         contextInvalidated = true;

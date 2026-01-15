@@ -18,6 +18,9 @@ let pttKeyCombo = null;
 // Speech recognition state
 let recognition = null;
 let micStream = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let sessionText = ''; // Accumulate all final text from this session
 let currentSessionId = null;
 let lastInterimTranscript = ''; // Track last interim text for when recognition stops
 
@@ -213,10 +216,14 @@ async function startRecognition(sessionId) {
 
   currentSessionId = sessionId;
   lastInterimTranscript = ''; // Clear any stale interim text from previous session
+  sessionText = ''; // Clear accumulated text from previous session
 
   try {
     // Get microphone access first
     micStream = await getMicrophoneAccess();
+
+    // Start audio recording
+    startAudioRecording();
 
     // Create speech recognition
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -257,9 +264,10 @@ async function startRecognition(sessionId) {
       if (interimTranscript) {
         lastInterimTranscript = interimTranscript;
       }
-      // Clear interim tracking when we get a final result
+      // Clear interim tracking and accumulate final text
       if (finalTranscript) {
         lastInterimTranscript = '';
+        sessionText += finalTranscript;
       }
 
       // Update interim text in UI
@@ -335,8 +343,55 @@ async function startRecognition(sessionId) {
   }
 }
 
+function startAudioRecording() {
+  if (!micStream) return;
+
+  try {
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(micStream, {
+      mimeType: 'audio/webm;codecs=opus'
+    });
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
+    };
+
+    mediaRecorder.start();
+    console.log('Utter Sidepanel: Audio recording started');
+  } catch (err) {
+    console.error('Utter Sidepanel: Failed to start audio recording:', err);
+  }
+}
+
+async function stopAudioRecording() {
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') return null;
+
+  return new Promise((resolve) => {
+    mediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+
+      // Convert blob to base64 data URL for storage
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        resolve(reader.result);
+      };
+      reader.readAsDataURL(audioBlob);
+    };
+
+    try {
+      mediaRecorder.stop();
+      console.log('Utter Sidepanel: Audio recording stopped');
+    } catch (err) {
+      console.error('Utter Sidepanel: Failed to stop audio recording:', err);
+      resolve(null);
+    }
+  });
+}
+
 // Stop speech recognition
-function stopRecognition(sessionId) {
+async function stopRecognition(sessionId) {
   console.log('Utter Sidepanel: Stopping recognition for session:', sessionId);
 
   if (currentSessionId !== sessionId) {
@@ -344,15 +399,10 @@ function stopRecognition(sessionId) {
     return;
   }
 
-  // If there's pending interim text, send it as a final result before stopping
-  if (lastInterimTranscript && currentSessionId) {
-    console.log('Utter Sidepanel: Sending pending interim text as final:', lastInterimTranscript);
-    sendToBackground({
-      type: 'recognition-result',
-      sessionId: currentSessionId,
-      finalTranscript: lastInterimTranscript,
-      interimTranscript: ''
-    });
+  // If there's pending interim text, add it to session text
+  if (lastInterimTranscript) {
+    console.log('Utter Sidepanel: Adding pending interim text as final:', lastInterimTranscript);
+    sessionText += lastInterimTranscript;
     lastInterimTranscript = '';
   }
 
@@ -367,6 +417,14 @@ function stopRecognition(sessionId) {
     }
   }
 
+  // Stop audio recording and get audio data
+  const audioDataUrl = await stopAudioRecording();
+
+  // Save to history if we have any text
+  if (sessionText) {
+    await saveTranscriptionToHistory(sessionText, audioDataUrl);
+  }
+
   playSound('boop.wav');
   cleanup();
 }
@@ -376,9 +434,17 @@ function cleanup() {
     micStream.getTracks().forEach(track => track.stop());
     micStream = null;
   }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    try {
+      mediaRecorder.stop();
+    } catch {}
+  }
+  mediaRecorder = null;
+  audioChunks = [];
   recognition = null;
   currentSessionId = null;
   lastInterimTranscript = '';
+  sessionText = '';
   hideRecordingUI();
 }
 
@@ -550,6 +616,167 @@ function createDeleteIcon() {
   return svg;
 }
 
+function createAudioPlayer(audioDataUrl, itemId) {
+  const container = document.createElement('div');
+  container.className = 'audio-player';
+  container.dataset.itemId = itemId;
+
+  const audio = new Audio(audioDataUrl);
+
+  // Control bar
+  const controls = document.createElement('div');
+  controls.className = 'audio-controls';
+
+  // Play/pause button
+  const playBtn = document.createElement('button');
+  playBtn.className = 'audio-play-btn';
+  playBtn.innerHTML = '▶'; // Play icon
+  playBtn.title = 'Play';
+
+  let isPlaying = false;
+  playBtn.addEventListener('click', () => {
+    if (isPlaying) {
+      audio.pause();
+      playBtn.innerHTML = '▶';
+      playBtn.title = 'Play';
+      isPlaying = false;
+    } else {
+      audio.play();
+      playBtn.innerHTML = '⏸'; // Pause icon
+      playBtn.title = 'Pause';
+      isPlaying = true;
+    }
+  });
+
+  audio.addEventListener('ended', () => {
+    playBtn.innerHTML = '▶';
+    playBtn.title = 'Play';
+    isPlaying = false;
+  });
+
+  controls.appendChild(playBtn);
+
+  // Time display
+  const timeDisplay = document.createElement('span');
+  timeDisplay.className = 'audio-time';
+  timeDisplay.textContent = '0:00 / 0:00';
+  controls.appendChild(timeDisplay);
+
+  // Visualizer canvas
+  const canvas = document.createElement('canvas');
+  canvas.className = 'audio-visualizer';
+  canvas.width = 400;
+  canvas.height = 60;
+
+  // Progress bar
+  const progressBar = document.createElement('div');
+  progressBar.className = 'audio-progress-bar';
+  const progressFill = document.createElement('div');
+  progressFill.className = 'audio-progress-fill';
+  progressBar.appendChild(progressFill);
+
+  // Update progress
+  audio.addEventListener('loadedmetadata', () => {
+    const duration = formatDuration(audio.duration);
+    timeDisplay.textContent = `0:00 / ${duration}`;
+  });
+
+  audio.addEventListener('timeupdate', () => {
+    const current = formatDuration(audio.currentTime);
+    const duration = formatDuration(audio.duration);
+    timeDisplay.textContent = `${current} / ${duration}`;
+
+    const progress = (audio.currentTime / audio.duration) * 100;
+    progressFill.style.width = `${progress}%`;
+  });
+
+  // Click on progress bar to seek
+  progressBar.addEventListener('click', (e) => {
+    const rect = progressBar.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percent = x / rect.width;
+    audio.currentTime = percent * audio.duration;
+  });
+
+  // Create visualizer
+  const ctx = canvas.getContext('2d');
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const analyser = audioContext.createAnalyser();
+  const source = audioContext.createMediaElementSource(audio);
+  source.connect(analyser);
+  analyser.connect(audioContext.destination);
+
+  analyser.fftSize = 256;
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+
+  function drawVisualizer() {
+    if (!isPlaying) {
+      requestAnimationFrame(drawVisualizer);
+      return;
+    }
+
+    analyser.getByteFrequencyData(dataArray);
+
+    ctx.fillStyle = 'rgb(245, 245, 245)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const barWidth = (canvas.width / bufferLength) * 2.5;
+    let barHeight;
+    let x = 0;
+
+    for (let i = 0; i < bufferLength; i++) {
+      barHeight = (dataArray[i] / 255) * canvas.height;
+
+      // Gradient color
+      const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      gradient.addColorStop(0, '#6366f1');
+      gradient.addColorStop(1, '#8b5cf6');
+      ctx.fillStyle = gradient;
+
+      ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+
+      x += barWidth + 1;
+    }
+
+    requestAnimationFrame(drawVisualizer);
+  }
+
+  drawVisualizer();
+
+  container.appendChild(controls);
+  container.appendChild(canvas);
+  container.appendChild(progressBar);
+
+  return container;
+}
+
+function formatDuration(seconds) {
+  if (isNaN(seconds)) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function downloadText(item) {
+  const blob = new Blob([item.text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `transcription-${item.id}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadAudio(item) {
+  if (!item.audioDataUrl) return;
+
+  const a = document.createElement('a');
+  a.href = item.audioDataUrl;
+  a.download = `recording-${item.id}.webm`;
+  a.click();
+}
+
 function createHistoryItem(item) {
   const div = document.createElement('div');
   div.className = 'history-item';
@@ -594,6 +821,34 @@ function createHistoryItem(item) {
   text.className = 'history-item-text';
   text.textContent = item.text;
   div.appendChild(text);
+
+  // Add audio player if audio data exists
+  if (item.audioDataUrl) {
+    const audioPlayer = createAudioPlayer(item.audioDataUrl, item.id);
+    div.appendChild(audioPlayer);
+  }
+
+  // Add action buttons
+  const actions = document.createElement('div');
+  actions.className = 'history-item-actions';
+
+  // Download text button
+  const downloadTextBtn = document.createElement('button');
+  downloadTextBtn.className = 'btn-secondary btn-small';
+  downloadTextBtn.textContent = 'Download Text';
+  downloadTextBtn.addEventListener('click', () => downloadText(item));
+  actions.appendChild(downloadTextBtn);
+
+  // Download audio button (if audio exists)
+  if (item.audioDataUrl) {
+    const downloadAudioBtn = document.createElement('button');
+    downloadAudioBtn.className = 'btn-secondary btn-small';
+    downloadAudioBtn.textContent = 'Download Audio';
+    downloadAudioBtn.addEventListener('click', () => downloadAudio(item));
+    actions.appendChild(downloadAudioBtn);
+  }
+
+  div.appendChild(actions);
 
   return div;
 }
@@ -646,6 +901,34 @@ async function saveHistory() {
     await chrome.storage.local.set({ utterHistory: history });
   } catch (err) {
     console.error('Error saving history:', err);
+  }
+}
+
+async function saveTranscriptionToHistory(text, audioDataUrl = null) {
+  try {
+    const entry = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      text: text,
+      timestamp: Date.now(),
+      url: 'Sidepanel Recording' // Mark as sidepanel recording
+    };
+
+    // Add audio data if available
+    if (audioDataUrl) {
+      entry.audioDataUrl = audioDataUrl;
+    }
+
+    history.push(entry);
+    const trimmedHistory = history.slice(-500); // Keep last 500 entries
+    history = trimmedHistory;
+
+    await chrome.storage.local.set({ utterHistory: trimmedHistory });
+    console.log('Utter Sidepanel: Saved to history with audio:', !!audioDataUrl);
+
+    // Refresh the UI
+    renderHistory();
+  } catch (err) {
+    console.error('Utter Sidepanel: Error saving to history:', err);
   }
 }
 

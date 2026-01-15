@@ -117,6 +117,120 @@ Utter is a Chrome extension that provides a global hotkey to invoke the Web Spee
 
 ---
 
+### v1.4 - Audio Recording and Playback
+
+**Description:** Automatically record audio alongside voice transcription, allowing users to listen back to their recordings with an inline audio visualizer and download both transcriptions and audio files.
+
+**User Flow:**
+1. User records voice input via hotkey, push-to-talk, or sidepanel
+2. Audio is automatically captured during the recording session
+3. In the side panel history, entries with audio show an inline audio player
+4. Audio player displays:
+   - Play/pause button
+   - Time progress (current / total duration)
+   - Real-time frequency visualizer with gradient bars
+   - Progress bar (clickable to seek)
+5. User can download the transcription as a text file
+6. User can download the audio recording as a .webm file
+7. Deleting a history entry removes both transcription and audio
+
+**User Benefits:**
+- Verify accuracy by listening to original recordings
+- Keep audio records for reference or archival purposes
+- Review pronunciation or speaking patterns
+- Download transcriptions and recordings for use in other applications
+
+**Technical Requirements:**
+- Use `MediaRecorder` API to capture audio from the microphone stream
+- Record in `audio/webm;codecs=opus` format for compatibility and small size
+- Store audio as base64 data URLs in `chrome.storage.local` alongside transcriptions
+- Web Audio API visualizer using `AnalyserNode` for real-time frequency display
+- Canvas-based waveform rendering with gradient colors
+- Inline audio player with custom controls (no default HTML5 audio element)
+- Download functionality using Blob URLs and anchor element download attribute
+
+**Implementation Details:**
+
+**Audio Recording in recognition-frame.js:**
+```javascript
+// Start MediaRecorder with microphone stream
+mediaRecorder = new MediaRecorder(micStream, {
+  mimeType: 'audio/webm;codecs=opus'
+});
+
+mediaRecorder.ondataavailable = (event) => {
+  if (event.data.size > 0) {
+    audioChunks.push(event.data);
+  }
+};
+
+mediaRecorder.start();
+
+// On stop, convert to data URL
+const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+const reader = new FileReader();
+reader.onloadend = () => {
+  const audioDataUrl = reader.result; // base64 data URL
+  // Send to parent via postMessage
+};
+reader.readAsDataURL(audioBlob);
+```
+
+**Storage Schema Update:**
+```json
+{
+  "utterHistory": [
+    {
+      "id": "unique-id",
+      "text": "transcribed text",
+      "timestamp": 1234567890,
+      "url": "https://example.com/page",
+      "audioDataUrl": "data:audio/webm;base64,..." // NEW FIELD
+    }
+  ]
+}
+```
+
+**Audio Player Component:**
+- Custom UI built with DOM elements (buttons, canvas, progress bar)
+- Web Audio API for visualizer:
+  - `AudioContext` to process audio
+  - `AnalyserNode` for frequency data
+  - `requestAnimationFrame` for smooth visualization
+  - Gradient bars (indigo to purple) showing frequency spectrum
+- Responsive canvas (400x60px) with bars representing frequency bins
+- Progress bar updates on `audio.ontimeupdate` event
+- Clickable progress bar for seeking to specific times
+
+**Download Functionality:**
+```javascript
+function downloadText(item) {
+  const blob = new Blob([item.text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `transcription-${item.id}.txt`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadAudio(item) {
+  const a = document.createElement('a');
+  a.href = item.audioDataUrl;
+  a.download = `recording-${item.id}.webm`;
+  a.click();
+}
+```
+
+**Storage Considerations:**
+- Audio recordings stored as base64 data URLs (~1.3x original size overhead)
+- Typical 10-second recording: ~80-150KB
+- 500 entry limit helps prevent storage quota issues
+- Chrome extensions have ~10MB local storage quota (QUOTA_BYTES)
+- Monitor storage usage and warn users if approaching limits
+
+---
+
 ## Architecture
 
 ### Iframe-Based Speech Recognition Architecture
@@ -175,7 +289,8 @@ Utter uses an innovative **iframe-based architecture** for speech recognition th
   finalTranscript: 'completed text',
   interimTranscript: 'partial text...',
   error: 'error-name',
-  recoverable: boolean
+  recoverable: boolean,
+  audioDataUrl: 'data:audio/webm;base64,...' // Sent with recognition-ended (v1.4)
 }
 ```
 

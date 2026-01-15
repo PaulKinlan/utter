@@ -47,6 +47,7 @@
   // Mark as active and store target element
   window.__utterActive = true;
   window.__utterTargetElement = targetElement;
+  window.__utterSessionText = ''; // Accumulate all text from this session
 
   // Set up message listener for recognition events from iframe
   if (!window.__utterMessageListener) {
@@ -72,7 +73,8 @@
       case 'recognition-result':
         if (message.finalTranscript) {
           insertText(window.__utterTargetElement, message.finalTranscript);
-          saveToHistory(message.finalTranscript);
+          // Accumulate text for this session
+          window.__utterSessionText += message.finalTranscript;
         }
         // Iframe shows interim transcription
         break;
@@ -85,6 +87,10 @@
         break;
 
       case 'recognition-ended':
+        // Save accumulated text with audio data
+        if (window.__utterSessionText) {
+          saveToHistory(window.__utterSessionText, message.audioDataUrl);
+        }
         cleanup();
         break;
     }
@@ -251,27 +257,35 @@
   function cleanup() {
     window.__utterActive = false;
     window.__utterTargetElement = null;
+    window.__utterSessionText = '';
     removeIndicator();
     removeRecognitionFrame();
   }
 
-  async function saveToHistory(text) {
+  async function saveToHistory(text, audioDataUrl = null) {
     if (!isContextValid()) return;
     try {
       const result = await chrome.storage.local.get(['utterHistory']);
       const history = result.utterHistory || [];
 
-      history.push({
+      const entry = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         text: text,
         timestamp: Date.now(),
         url: window.location.href
-      });
+      };
+
+      // Add audio data if available
+      if (audioDataUrl) {
+        entry.audioDataUrl = audioDataUrl;
+      }
+
+      history.push(entry);
 
       const trimmedHistory = history.slice(-500);
 
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
-      console.log('Utter: Saved to history');
+      console.log('Utter: Saved to history with audio:', !!audioDataUrl);
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         return;
