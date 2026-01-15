@@ -48,6 +48,8 @@
       align-items: center;
       justify-content: center;
     }
+    /* Canvas uses 2x intrinsic dimensions (360x64) for crisp rendering on high-DPI displays,
+       then scaled down via CSS to 180x32 for compact UI */
     #frequency-canvas {
       width: 180px;
       height: 32px;
