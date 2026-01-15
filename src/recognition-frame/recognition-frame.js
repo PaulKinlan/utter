@@ -4,17 +4,28 @@
 const statusText = document.getElementById('status-text');
 const interimEl = document.getElementById('interim');
 const pulseEl = document.getElementById('pulse');
+const frequencyCanvas = document.getElementById('frequency-canvas');
+const canvasCtx = frequencyCanvas.getContext('2d');
 
 let recognition = null;
 let micStream = null;
 let mediaRecorder = null;
 let audioChunks = [];
+let audioContext = null;
+let analyser = null;
+let animationId = null;
+let mediaStreamSource = null;
+let frequencyDataArray = null;
 let settings = {
   selectedMicrophone: '',
   soundFeedbackEnabled: true,
   audioVolume: 0.5
 };
 let lastInterimTranscript = '';
+
+// Voice frequency range: sample roughly 0-3kHz (human voice fundamental + formants)
+// at typical 48kHz sample rate with FFT size 256
+const VOICE_FREQUENCY_RATIO = 0.25;
 
 // Initialize
 init();
@@ -70,12 +81,107 @@ async function getMicrophoneAccess() {
   return navigator.mediaDevices.getUserMedia({ audio: true });
 }
 
+function setupFrequencyAnalyzer(stream) {
+  try {
+    // Create audio context and analyser
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      console.warn('Utter Recognition Frame: Web Audio API not supported');
+      return;
+    }
+
+    audioContext = new AudioContextClass();
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+
+    // Allocate frequency data array once (reused in animation loop)
+    frequencyDataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    // Connect microphone stream to analyser
+    mediaStreamSource = audioContext.createMediaStreamSource(stream);
+    mediaStreamSource.connect(analyser);
+
+    // Start visualization loop
+    drawFrequencyBars();
+  } catch (err) {
+    console.error('Utter Recognition Frame: Failed to setup frequency analyzer:', err);
+  }
+}
+
+function drawFrequencyBars() {
+  if (!analyser || !frequencyDataArray) return;
+
+  // Reuse pre-allocated array - no GC pressure
+  analyser.getByteFrequencyData(frequencyDataArray);
+
+  const width = frequencyCanvas.width;
+  const height = frequencyCanvas.height;
+  const barCount = 24;
+  const barWidth = width / barCount;
+  const barSpacing = 2;
+
+  // Clear canvas
+  canvasCtx.clearRect(0, 0, width, height);
+
+  // Draw bars
+  for (let i = 0; i < barCount; i++) {
+    // Sample voice frequency range (0-3kHz contains fundamental + formants)
+    const dataIndex = Math.floor(i * frequencyDataArray.length / barCount * VOICE_FREQUENCY_RATIO);
+    const value = frequencyDataArray[dataIndex];
+    const barHeight = (value / 255) * height;
+
+    const x = i * barWidth;
+    const y = height - barHeight;
+
+    // Draw bar with white color and some transparency
+    canvasCtx.fillStyle = `rgba(255, 255, 255, ${0.7 + (value / 255) * 0.3})`;
+    canvasCtx.fillRect(
+      x + barSpacing / 2,
+      y,
+      barWidth - barSpacing,
+      barHeight
+    );
+  }
+
+  // Continue animation loop
+  animationId = requestAnimationFrame(drawFrequencyBars);
+}
+
+function stopFrequencyAnalyzer() {
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = null;
+  }
+
+  // Disconnect audio nodes to prevent resource leaks
+  if (mediaStreamSource) {
+    mediaStreamSource.disconnect();
+    mediaStreamSource = null;
+  }
+
+  if (audioContext) {
+    audioContext.close().catch(() => {});
+    audioContext = null;
+  }
+
+  analyser = null;
+  frequencyDataArray = null;
+
+  // Clear canvas
+  if (canvasCtx) {
+    canvasCtx.clearRect(0, 0, frequencyCanvas.width, frequencyCanvas.height);
+  }
+}
+
 async function startRecognition() {
   // Get microphone access
   micStream = await getMicrophoneAccess();
 
   // Start audio recording
   startAudioRecording();
+  // Setup frequency analyzer for voice visualization
+  setupFrequencyAnalyzer(micStream);
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -225,6 +331,7 @@ async function stopRecognition() {
 }
 
 function cleanup() {
+  stopFrequencyAnalyzer();
   if (micStream) {
     micStream.getTracks().forEach(track => track.stop());
     micStream = null;
