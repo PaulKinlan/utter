@@ -42,6 +42,20 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .visualizer {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* Canvas uses 2x intrinsic dimensions (360x64) for crisp rendering on high-DPI displays,
+       then scaled down via CSS to 180x32 for compact UI */
+    #frequency-canvas {
+      width: 180px;
+      height: 32px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.1);
+    }
   </style>
 </head>
 <body>
@@ -50,6 +64,9 @@
     <span id="status-text">Starting...</span>
   </div>
   <div class="interim" id="interim"></div>
+  <div class="visualizer">
+    <canvas id="frequency-canvas" width="360" height="64"></canvas>
+  </div>
   <script src="recognition-frame.js"></script>
 </body>
 </html>
