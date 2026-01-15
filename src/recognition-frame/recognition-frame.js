@@ -4,9 +4,14 @@
 const statusText = document.getElementById('status-text');
 const interimEl = document.getElementById('interim');
 const pulseEl = document.getElementById('pulse');
+const frequencyCanvas = document.getElementById('frequency-canvas');
+const canvasCtx = frequencyCanvas.getContext('2d');
 
 let recognition = null;
 let micStream = null;
+let audioContext = null;
+let analyser = null;
+let animationId = null;
 let settings = {
   selectedMicrophone: '',
   soundFeedbackEnabled: true,
@@ -68,9 +73,84 @@ async function getMicrophoneAccess() {
   return navigator.mediaDevices.getUserMedia({ audio: true });
 }
 
+function setupFrequencyAnalyzer(stream) {
+  // Create audio context and analyser
+  audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  analyser = audioContext.createAnalyser();
+  analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.8;
+
+  // Connect microphone stream to analyser
+  const source = audioContext.createMediaStreamSource(stream);
+  source.connect(analyser);
+
+  // Start visualization loop
+  drawFrequencyBars();
+}
+
+function drawFrequencyBars() {
+  if (!analyser) return;
+
+  const bufferLength = analyser.frequencyBinCount;
+  const dataArray = new Uint8Array(bufferLength);
+  analyser.getByteFrequencyData(dataArray);
+
+  const width = frequencyCanvas.width;
+  const height = frequencyCanvas.height;
+  const barCount = 24;
+  const barWidth = width / barCount;
+  const barSpacing = 2;
+
+  // Clear canvas
+  canvasCtx.clearRect(0, 0, width, height);
+
+  // Draw bars
+  for (let i = 0; i < barCount; i++) {
+    // Sample frequency data (use lower frequencies for voice)
+    const dataIndex = Math.floor(i * bufferLength / barCount / 4);
+    const value = dataArray[dataIndex];
+    const barHeight = (value / 255) * height;
+
+    const x = i * barWidth;
+    const y = height - barHeight;
+
+    // Draw bar with white color and some transparency
+    canvasCtx.fillStyle = `rgba(255, 255, 255, ${0.7 + (value / 255) * 0.3})`;
+    canvasCtx.fillRect(
+      x + barSpacing / 2,
+      y,
+      barWidth - barSpacing,
+      barHeight
+    );
+  }
+
+  // Continue animation loop
+  animationId = requestAnimationFrame(drawFrequencyBars);
+}
+
+function stopFrequencyAnalyzer() {
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+    animationId = null;
+  }
+  if (audioContext) {
+    audioContext.close().catch(() => {});
+    audioContext = null;
+  }
+  analyser = null;
+
+  // Clear canvas
+  if (canvasCtx) {
+    canvasCtx.clearRect(0, 0, frequencyCanvas.width, frequencyCanvas.height);
+  }
+}
+
 async function startRecognition() {
   // Get microphone access
   micStream = await getMicrophoneAccess();
+
+  // Setup frequency analyzer for voice visualization
+  setupFrequencyAnalyzer(micStream);
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
@@ -169,6 +249,7 @@ function stopRecognition() {
 }
 
 function cleanup() {
+  stopFrequencyAnalyzer();
   if (micStream) {
     micStream.getTracks().forEach(track => track.stop());
     micStream = null;
