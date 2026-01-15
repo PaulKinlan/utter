@@ -9,6 +9,8 @@ const canvasCtx = frequencyCanvas.getContext('2d');
 
 let recognition = null;
 let micStream = null;
+let mediaRecorder = null;
+let audioChunks = [];
 let audioContext = null;
 let analyser = null;
 let animationId = null;
@@ -176,6 +178,8 @@ async function startRecognition() {
   // Get microphone access
   micStream = await getMicrophoneAccess();
 
+  // Start audio recording
+  startAudioRecording();
   // Setup frequency analyzer for voice visualization
   setupFrequencyAnalyzer(micStream);
 
@@ -251,7 +255,52 @@ async function startRecognition() {
   recognition.start();
 }
 
-function stopRecognition() {
+function startAudioRecording() {
+  if (!micStream) return;
+
+  try {
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(micStream, {
+      mimeType: 'audio/webm;codecs=opus'
+    });
+
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
+    };
+
+    mediaRecorder.start();
+  } catch (err) {
+    console.error('Utter Recognition Frame: Failed to start audio recording:', err);
+  }
+}
+
+async function stopAudioRecording() {
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') return null;
+
+  return new Promise((resolve) => {
+    mediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+
+      // Convert blob to base64 data URL for storage
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        resolve(reader.result);
+      };
+      reader.readAsDataURL(audioBlob);
+    };
+
+    try {
+      mediaRecorder.stop();
+    } catch (err) {
+      console.error('Utter Recognition Frame: Failed to stop audio recording:', err);
+      resolve(null);
+    }
+  });
+}
+
+async function stopRecognition() {
   // Send any pending interim text as final
   if (lastInterimTranscript) {
     sendToParent({
@@ -270,8 +319,14 @@ function stopRecognition() {
     } catch {}
   }
 
+  // Stop audio recording and get the audio data
+  const audioDataUrl = await stopAudioRecording();
+
   playSound('boop.wav');
-  sendToParent({ type: 'recognition-ended' });
+  sendToParent({
+    type: 'recognition-ended',
+    audioDataUrl
+  });
   cleanup();
 }
 
@@ -281,6 +336,13 @@ function cleanup() {
     micStream.getTracks().forEach(track => track.stop());
     micStream = null;
   }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    try {
+      mediaRecorder.stop();
+    } catch {}
+  }
+  mediaRecorder = null;
+  audioChunks = [];
   recognition = null;
 }
 
