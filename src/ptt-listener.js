@@ -184,10 +184,10 @@
         position: fixed;
         bottom: 60px;
         right: 20px;
-        width: 220px;
-        height: 60px;
+        width: 200px;
+        height: 44px;
         border: none;
-        border-radius: 8px;
+        border-radius: 6px;
         z-index: 2147483647;
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
       `;

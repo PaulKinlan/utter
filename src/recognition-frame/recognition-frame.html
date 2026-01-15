@@ -6,7 +6,7 @@
   <style>
     body {
       margin: 0;
-      padding: 8px;
+      padding: 6px 10px;
       font-family: system-ui, sans-serif;
       font-size: 12px;
       background: #3b82f6;
@@ -25,6 +25,7 @@
       background: white;
       border-radius: 50%;
       animation: pulse 1s infinite;
+      flex-shrink: 0;
     }
     @keyframes pulse {
       0%, 100% { opacity: 1; }
@@ -33,28 +34,25 @@
     .error {
       background: #ef4444;
     }
+    #status-text {
+      flex-shrink: 0;
+    }
+    /* Inline visualizer next to status text */
+    #frequency-canvas {
+      width: 60px;
+      height: 14px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.15);
+      margin-left: auto;
+      flex-shrink: 0;
+    }
     .interim {
-      margin-top: 4px;
-      font-size: 11px;
-      opacity: 0.9;
-      max-width: 200px;
+      margin-top: 2px;
+      font-size: 10px;
+      opacity: 0.85;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-    .visualizer {
-      margin-top: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    /* Canvas uses 2x intrinsic dimensions (360x64) for crisp rendering on high-DPI displays,
-       then scaled down via CSS to 180x32 for compact UI */
-    #frequency-canvas {
-      width: 180px;
-      height: 32px;
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.1);
     }
   </style>
 </head>
@@ -62,11 +60,9 @@
   <div class="status">
     <div class="pulse" id="pulse"></div>
     <span id="status-text">Starting...</span>
+    <canvas id="frequency-canvas" width="120" height="28"></canvas>
   </div>
   <div class="interim" id="interim"></div>
-  <div class="visualizer">
-    <canvas id="frequency-canvas" width="360" height="64"></canvas>
-  </div>
   <script src="recognition-frame.js"></script>
 </body>
 </html>

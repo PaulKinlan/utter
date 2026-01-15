@@ -117,7 +117,7 @@ function drawFrequencyBars() {
 
   const width = frequencyCanvas.width;
   const height = frequencyCanvas.height;
-  const barCount = 24;
+  const barCount = 12; // Fewer bars for compact inline display
   const barWidth = width / barCount;
   const barSpacing = 2;
 
