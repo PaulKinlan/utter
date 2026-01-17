@@ -151,6 +151,50 @@ The extension uses an **iframe-based architecture** for speech recognition. This
 
 See PRODUCT_REQUIREMENTS.md "Architecture" section for full details.
 
+### Chrome Prompt API (Gemini Nano)
+
+The extension uses Chrome's built-in Prompt API for AI-powered text refinement.
+
+**API Reference:** https://developer.chrome.com/docs/ai/prompt-api
+
+**Correct API Surface (DO NOT USE OLD API):**
+```javascript
+// Namespace: window.LanguageModel (NOT window.ai.languageModel)
+
+// Check availability - returns "available", "downloading", or "unavailable"
+const availability = await LanguageModel.availability();
+
+// Get model parameters
+const params = await LanguageModel.params();
+// Returns: { defaultTopK, maxTopK, defaultTemperature, maxTemperature }
+
+// Create session
+const session = await LanguageModel.create({
+  temperature: 0.3,
+  topK: 3,
+  initialPrompts: [],  // Optional: seed context with prior messages
+  signal: abortSignal, // Optional: AbortSignal to destroy session
+});
+
+// Session methods
+await session.prompt(input);           // Returns complete response
+session.promptStreaming(input);        // Returns ReadableStream
+await session.append(messages);        // Add context after creation
+await session.clone();                 // Fork conversation
+await session.measureInputUsage(input); // Check quota before prompting
+session.destroy();                     // Free resources
+
+// Session properties
+session.inputUsage;  // Current tokens consumed
+session.inputQuota;  // Maximum tokens available
+```
+
+**Message Format:**
+- Messages have `role` ("user", "assistant", "system") and `content`
+- Content supports mixed modality arrays with `type` and `value` fields
+
+**Implementation:** See `src/refinement-service.js`
+
 ## Source Control
 
 - **Always commit automatically** when you complete a task or logical unit of work - do not ask for permission

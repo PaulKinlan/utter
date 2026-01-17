@@ -1,5 +1,6 @@
 // Text refinement service using Chrome Prompt API (Gemini Nano)
-// Available from Chrome 138+ for extensions
+// API Reference: https://developer.chrome.com/docs/ai/prompt-api
+// Uses window.LanguageModel API
 
 /**
  * Preset refinement prompts
@@ -39,30 +40,32 @@ export const PRESET_PROMPTS = {
 
 /**
  * Check if the Prompt API is available
+ * @returns {Promise<{available: boolean, reason?: string, canDownload?: boolean, params?: object}>}
  */
 export async function checkAvailability() {
   try {
-    if (!window.ai?.languageModel) {
+    if (typeof LanguageModel === 'undefined') {
       return {
         available: false,
         reason: 'Prompt API not supported in this browser',
       };
     }
 
-    const availability = await window.ai.languageModel.capabilities();
+    const availability = await LanguageModel.availability();
 
-    if (availability.available === 'readily') {
-      return { available: true };
-    } else if (availability.available === 'after-download') {
+    if (availability === 'available') {
+      const params = await LanguageModel.params();
+      return { available: true, params };
+    } else if (availability === 'downloading') {
       return {
         available: false,
-        reason: 'Model needs to be downloaded. This will happen automatically on first use.',
+        reason: 'Model is downloading. Please wait and try again.',
         canDownload: true,
       };
     } else {
       return {
         available: false,
-        reason: availability.available || 'API not available',
+        reason: 'Prompt API not available on this device',
       };
     }
   } catch (err) {
@@ -76,12 +79,18 @@ export async function checkAvailability() {
 
 /**
  * Create a language model session
+ * @param {object} options - Session options
+ * @param {number} [options.temperature=0.3] - Response randomness (0-1)
+ * @param {number} [options.topK=3] - Token diversity filtering
+ * @param {Array} [options.initialPrompts] - Prior messages to seed context
+ * @param {AbortSignal} [options.signal] - AbortSignal to destroy session
+ * @returns {Promise<object>} Language model session
  */
 export async function createSession(options = {}) {
   try {
-    const session = await window.ai.languageModel.create({
-      temperature: options.temperature || 0.3, // Lower for more consistent refinement
-      topK: options.topK || 3,
+    const session = await LanguageModel.create({
+      temperature: options.temperature ?? 0.3, // Lower for more consistent refinement
+      topK: options.topK ?? 3,
       ...options,
     });
     return session;

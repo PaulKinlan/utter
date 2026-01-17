@@ -250,8 +250,8 @@ function downloadAudio(item) {
 - Compare original and refined text in history for review
 
 **Technical Requirements:**
-- Chrome Prompt API (Gemini Nano) via `window.ai.languageModel`
-- Available from Chrome 138+ for extensions
+- Chrome Prompt API (Gemini Nano) via `window.LanguageModel`
+- API Reference: https://developer.chrome.com/docs/ai/prompt-api
 - Settings stored in `chrome.storage.local`:
   - `refinementEnabled` (boolean)
   - `selectedRefinementPrompt` (string - preset ID or custom prompt ID)
@@ -272,10 +272,15 @@ function downloadAudio(item) {
 **Refinement Service (`refinement-service.js`):**
 ```javascript
 // Check API availability
-const availability = await window.ai.languageModel.capabilities();
+const availability = await LanguageModel.availability();
+// Returns: "available", "downloading", or "unavailable"
+
+// Get model parameters
+const params = await LanguageModel.params();
+// Returns: { defaultTopK, maxTopK, defaultTemperature, maxTemperature }
 
 // Create session with low temperature for consistency
-const session = await window.ai.languageModel.create({
+const session = await LanguageModel.create({
   temperature: 0.3,
   topK: 3
 });
