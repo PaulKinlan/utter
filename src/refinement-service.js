@@ -101,6 +101,68 @@ export async function createSession(options = {}) {
 }
 
 /**
+ * Trigger model download and monitor progress
+ * @param {function} onStatusChange - Callback called with status updates
+ * @returns {Promise<boolean>} True if model is ready, false if unavailable
+ */
+export async function ensureModelReady(onStatusChange = null) {
+  try {
+    if (typeof LanguageModel === 'undefined') {
+      onStatusChange?.({ status: 'error', message: 'Prompt API not supported' });
+      return false;
+    }
+
+    // Check initial availability
+    let availability = await LanguageModel.availability();
+
+    if (availability === 'available') {
+      onStatusChange?.({ status: 'available', message: 'Ready' });
+      return true;
+    }
+
+    if (availability === 'unavailable') {
+      onStatusChange?.({ status: 'error', message: 'Not available on this device' });
+      return false;
+    }
+
+    // Status is 'downloading' - monitor progress
+    onStatusChange?.({ status: 'downloading', message: 'Downloading model...' });
+
+    // Poll for completion
+    const pollInterval = 1000; // 1 second
+    const maxWait = 300000; // 5 minutes max
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWait) {
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+      availability = await LanguageModel.availability();
+
+      if (availability === 'available') {
+        onStatusChange?.({ status: 'available', message: 'Ready' });
+        return true;
+      }
+
+      if (availability === 'unavailable') {
+        onStatusChange?.({ status: 'error', message: 'Download failed' });
+        return false;
+      }
+
+      // Still downloading
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      onStatusChange?.({ status: 'downloading', message: `Downloading model... (${elapsed}s)` });
+    }
+
+    onStatusChange?.({ status: 'error', message: 'Download timed out' });
+    return false;
+  } catch (err) {
+    console.error('Error ensuring model ready:', err);
+    onStatusChange?.({ status: 'error', message: err.message || 'Unknown error' });
+    return false;
+  }
+}
+
+/**
  * Refine text using a preset prompt
  */
 export async function refineWithPreset(text, presetId, onProgress = null) {

@@ -410,3 +410,42 @@ button.primary:disabled {
   opacity: 0.5;
   pointer-events: none;
 }
+
+/* Download status indicator */
+.download-status {
+  font-size: 13px;
+  font-weight: normal;
+  margin-left: 4px;
+}
+
+.download-status:empty {
+  display: none;
+}
+
+.download-status.downloading {
+  color: #d97706;
+}
+
+.download-status.available {
+  color: #059669;
+}
+
+.download-status.error {
+  color: #dc2626;
+}
+
+.download-status .spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #d97706;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

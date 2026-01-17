@@ -70,7 +70,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         code: 'Period'
       },
       audioVolume: 0.5,
-      refinementEnabled: true,
+      refinementEnabled: false,
       selectedRefinementPrompt: 'basic-cleanup',
       refinementPttKeyCombo: {
         ctrlKey: false,

@@ -1,6 +1,6 @@
 // Options page script
 
-import { PRESET_PROMPTS, checkAvailability, getAvailablePrompts } from '../refinement-service.js';
+import { PRESET_PROMPTS, checkAvailability, getAvailablePrompts, ensureModelReady } from '../refinement-service.js';
 
 const microphoneSelect = document.getElementById('microphone-select');
 const microphoneField = document.getElementById('microphone-field');
@@ -30,6 +30,7 @@ const testSoundBtn = document.getElementById('test-sound');
 
 // Refinement elements
 const refinementEnabledCheckbox = document.getElementById('refinement-enabled');
+const refinementDownloadStatus = document.getElementById('refinement-download-status');
 const refinementSettings = document.getElementById('refinement-settings');
 const refinementPromptSelect = document.getElementById('refinement-prompt');
 const promptDescription = document.getElementById('prompt-description');
@@ -165,9 +166,10 @@ async function loadSavedSettings() {
     volumeSlider.value = Math.round(volume * 100);
     volumeValue.textContent = `${Math.round(volume * 100)}%`;
 
-    // Set refinement settings
-    refinementEnabledCheckbox.checked = result.refinementEnabled !== false;
-    updateRefinementSettingsUI(result.refinementEnabled !== false);
+    // Set refinement settings (default to false for new installs)
+    const refinementEnabled = result.refinementEnabled === true;
+    refinementEnabledCheckbox.checked = refinementEnabled;
+    updateRefinementSettingsUI(refinementEnabled);
 
     // Set refinement PTT key combo
     if (result.refinementPttKeyCombo) {
@@ -387,6 +389,29 @@ testSoundBtn.addEventListener('click', () => {
 // Refinement enabled change
 refinementEnabledCheckbox.addEventListener('change', async () => {
   const enabled = refinementEnabledCheckbox.checked;
+
+  if (enabled) {
+    // Disable checkbox while checking/downloading
+    refinementEnabledCheckbox.disabled = true;
+
+    // Check availability and trigger download if needed
+    const ready = await ensureModelReady((status) => {
+      updateDownloadStatus(status);
+    });
+
+    refinementEnabledCheckbox.disabled = false;
+
+    if (!ready) {
+      // Model not available - uncheck and show error
+      refinementEnabledCheckbox.checked = false;
+      updateRefinementSettingsUI(false);
+      return;
+    }
+  } else {
+    // Clear download status when disabling
+    updateDownloadStatus(null);
+  }
+
   updateRefinementSettingsUI(enabled);
 
   try {
@@ -396,6 +421,29 @@ refinementEnabledCheckbox.addEventListener('change', async () => {
     console.error('Error saving refinement enabled setting:', err);
   }
 });
+
+function updateDownloadStatus(status) {
+  // Clear existing content
+  refinementDownloadStatus.textContent = '';
+  refinementDownloadStatus.className = 'download-status';
+
+  if (!status) {
+    return;
+  }
+
+  refinementDownloadStatus.classList.add(status.status);
+
+  if (status.status === 'downloading') {
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    refinementDownloadStatus.appendChild(spinner);
+    refinementDownloadStatus.appendChild(document.createTextNode(status.message));
+  } else if (status.status === 'available') {
+    refinementDownloadStatus.textContent = '✓ ' + status.message;
+  } else if (status.status === 'error') {
+    refinementDownloadStatus.textContent = '✗ ' + status.message;
+  }
+}
 
 function updateRefinementSettingsUI(enabled) {
   if (enabled) {
@@ -696,12 +744,20 @@ async function checkApiAvailability() {
     if (availability.available) {
       apiStatus.textContent = '✓ Chrome AI (Gemini Nano) is available and ready';
       apiStatus.style.color = '#059669';
+      // Update download status if refinement is enabled
+      if (refinementEnabledCheckbox.checked) {
+        updateDownloadStatus({ status: 'available', message: 'Ready' });
+      }
     } else if (availability.canDownload) {
-      apiStatus.textContent = '⚠ Model will download automatically on first use';
+      apiStatus.textContent = '⚠ Model is downloading - enable text refinement to see progress';
       apiStatus.style.color = '#d97706';
     } else {
       apiStatus.textContent = `✗ AI not available: ${availability.reason}`;
       apiStatus.style.color = '#dc2626';
+      // Show error in download status if refinement was enabled
+      if (refinementEnabledCheckbox.checked) {
+        updateDownloadStatus({ status: 'error', message: availability.reason });
+      }
     }
   } catch (err) {
     console.error('Error checking API availability:', err);
