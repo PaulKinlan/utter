@@ -112,17 +112,21 @@
       case 'recognition-ended':
         // Handle refinement mode - refine text before saving/inserting
         if (isRefinementRecording && window.__utterSessionText) {
-          handleRefinementComplete(window.__utterSessionText, message.audioDataUrl);
+          // Don't cleanup yet - handleRefinementComplete needs the target element
+          // It will handle cleanup after insertion
+          handleRefinementComplete(window.__utterSessionText, message.audioDataUrl, window.__utterTargetElement);
         } else if (window.__utterSessionText) {
           // Normal mode - save accumulated text with audio data
           saveToHistory(window.__utterSessionText, message.audioDataUrl);
+          cleanup();
+        } else {
+          cleanup();
         }
-        cleanup();
         break;
     }
   }
 
-  async function handleRefinementComplete(text, audioDataUrl) {
+  async function handleRefinementComplete(text, audioDataUrl, targetElement) {
     showIndicator('Refining text...');
 
     try {
@@ -167,8 +171,8 @@
         }
       }
 
-      // Insert the refined text
-      insertText(window.__utterTargetElement, refinedText);
+      // Insert the refined text (use passed targetElement, not global)
+      insertText(targetElement, refinedText);
 
       // Save to history with both original and refined text
       await saveToHistoryWithRefinement(text, refinedText, audioDataUrl);
@@ -178,9 +182,12 @@
     } catch (err) {
       console.error('Utter PTT: Error refining text:', err);
       // Fall back to inserting original text
-      insertText(window.__utterTargetElement, text);
+      insertText(targetElement, text);
       saveToHistory(text, audioDataUrl);
       showIndicator(`Refinement failed: ${err.message}`, true);
+    } finally {
+      // Cleanup after refinement is complete
+      cleanup();
     }
   }
 
