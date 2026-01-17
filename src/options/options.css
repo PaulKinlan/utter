@@ -289,3 +289,124 @@ a:hover {
 .volume-control button {
   flex-shrink: 0;
 }
+
+/* Modal styles */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+
+.modal-content h2 {
+  margin-top: 0;
+}
+
+.modal-content input[type="text"],
+.modal-content textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+.modal-content textarea {
+  resize: vertical;
+  min-height: 80px;
+}
+
+.modal-content input:focus,
+.modal-content textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+button.primary {
+  background: #3b82f6;
+  color: #ffffff;
+}
+
+button.primary:hover {
+  background: #2563eb;
+}
+
+button.primary:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+/* Custom prompts list */
+#custom-prompts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.custom-prompt-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.custom-prompt-info {
+  flex: 1;
+}
+
+.custom-prompt-name {
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.custom-prompt-description {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.custom-prompt-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.custom-prompt-actions button {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+#refinement-settings.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}

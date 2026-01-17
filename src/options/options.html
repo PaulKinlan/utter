@@ -89,7 +89,73 @@
       </div>
     </section>
 
+    <section>
+      <h2>Text Refinement</h2>
+      <p class="description">Use AI to refine transcribed text by removing filler words, improving grammar, or changing tone.</p>
+
+      <div class="field">
+        <label class="checkbox-label">
+          <input type="checkbox" id="refinement-enabled" checked>
+          <span>Enable text refinement</span>
+        </label>
+      </div>
+
+      <div id="refinement-settings">
+        <div class="field">
+          <label for="refinement-prompt">Refinement Style</label>
+          <select id="refinement-prompt">
+            <option value="">Loading prompts...</option>
+          </select>
+          <p class="description" id="prompt-description"></p>
+        </div>
+
+        <div class="field">
+          <label>Custom Prompts</label>
+          <div id="custom-prompts-list"></div>
+          <button id="add-custom-prompt" class="secondary">Add Custom Prompt</button>
+        </div>
+
+        <div class="field">
+          <label for="refinement-ptt-combo">Refinement Hotkey</label>
+          <p class="description">Press this after transcription to refine the last text. Default: <kbd>Alt+R</kbd></p>
+          <div class="key-recorder">
+            <input type="text" id="refinement-ptt-combo" readonly placeholder="Click Record to set">
+            <button id="record-refinement-combo" class="secondary">Record</button>
+            <button id="clear-refinement-combo" class="secondary">Clear</button>
+          </div>
+          <p id="refinement-ptt-status" class="status"></p>
+        </div>
+
+        <div class="field">
+          <p class="description" id="api-status">Checking AI availability...</p>
+        </div>
+      </div>
+    </section>
+
     <div id="save-status" class="save-status"></div>
+  </div>
+
+  <!-- Custom Prompt Modal -->
+  <div id="custom-prompt-modal" class="modal hidden">
+    <div class="modal-content">
+      <h2>Add Custom Refinement Prompt</h2>
+      <div class="field">
+        <label for="custom-prompt-name">Name</label>
+        <input type="text" id="custom-prompt-name" placeholder="e.g., Make Technical">
+      </div>
+      <div class="field">
+        <label for="custom-prompt-description">Description</label>
+        <input type="text" id="custom-prompt-description" placeholder="e.g., Use technical jargon">
+      </div>
+      <div class="field">
+        <label for="custom-prompt-text">Prompt Instructions</label>
+        <textarea id="custom-prompt-text" rows="4" placeholder="e.g., Rephrase the text using technical terminology and precise language."></textarea>
+      </div>
+      <div class="modal-buttons">
+        <button id="save-custom-prompt" class="primary">Save</button>
+        <button id="cancel-custom-prompt" class="secondary">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script src="options.js" type="module"></script>

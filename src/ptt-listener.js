@@ -8,12 +8,18 @@
 
   let settings = {
     activationMode: 'toggle',
-    pttKeyCombo: null
+    pttKeyCombo: null,
+    refinementEnabled: true,
+    refinementPttKeyCombo: null,
+    selectedRefinementPrompt: 'basic-cleanup'
   };
 
   let isKeyHeld = false;
+  let isRefinementKeyHeld = false;
   let contextInvalidated = false;
   let recognitionFrame = null;
+  let lastTranscriptionEntry = null; // Track last transcription for refinement
+  let lastInsertionInfo = null; // Track where text was inserted for replacement
 
   // Check if extension context is still valid
   function isContextValid() {
@@ -34,14 +40,32 @@
     if (changes.pttKeyCombo) {
       settings.pttKeyCombo = changes.pttKeyCombo.newValue;
     }
+    if (changes.refinementEnabled) {
+      settings.refinementEnabled = changes.refinementEnabled.newValue;
+    }
+    if (changes.refinementPttKeyCombo) {
+      settings.refinementPttKeyCombo = changes.refinementPttKeyCombo.newValue;
+    }
+    if (changes.selectedRefinementPrompt) {
+      settings.selectedRefinementPrompt = changes.selectedRefinementPrompt.newValue;
+    }
   });
 
   async function loadSettings() {
     if (!isContextValid()) return;
     try {
-      const result = await chrome.storage.local.get(['activationMode', 'pttKeyCombo']);
+      const result = await chrome.storage.local.get([
+        'activationMode',
+        'pttKeyCombo',
+        'refinementEnabled',
+        'refinementPttKeyCombo',
+        'selectedRefinementPrompt'
+      ]);
       settings.activationMode = result.activationMode || 'toggle';
       settings.pttKeyCombo = result.pttKeyCombo || null;
+      settings.refinementEnabled = result.refinementEnabled !== false;
+      settings.refinementPttKeyCombo = result.refinementPttKeyCombo || null;
+      settings.selectedRefinementPrompt = result.selectedRefinementPrompt || 'basic-cleanup';
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         contextInvalidated = true;
@@ -119,6 +143,36 @@
       console.log('Utter PTT: Key released, stopping recognition');
       isKeyHeld = false;
       stopRecognition();
+    }
+  }, true);
+
+  // Listen for refinement PTT keydown
+  document.addEventListener('keydown', async (e) => {
+    if (!isContextValid()) return;
+    if (!settings.refinementEnabled) return;
+    if (!settings.refinementPttKeyCombo) return;
+    if (!matchesCombo(e, settings.refinementPttKeyCombo)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (isRefinementKeyHeld) return;
+    isRefinementKeyHeld = true;
+
+    console.log('Utter PTT: Refinement key pressed, starting refinement');
+    await startRefinement();
+  }, true);
+
+  // Listen for refinement PTT keyup
+  document.addEventListener('keyup', (e) => {
+    if (!isContextValid()) return;
+    if (!settings.refinementEnabled) return;
+    if (!settings.refinementPttKeyCombo) return;
+    if (!isRefinementKeyHeld) return;
+
+    if (isPartOfCombo(e, settings.refinementPttKeyCombo)) {
+      console.log('Utter PTT: Refinement key released');
+      isRefinementKeyHeld = false;
     }
   }, true);
 
@@ -271,6 +325,13 @@
           }
         }
         console.log('Utter PTT: Inserted into contenteditable');
+
+        // Track insertion for contenteditable (best effort)
+        lastInsertionInfo = {
+          element: element,
+          text: text,
+          isContentEditable: true
+        };
       } else {
         // For input/textarea elements
         const start = element.selectionStart ?? element.value?.length ?? 0;
@@ -278,11 +339,21 @@
         const value = element.value || '';
 
         element.value = value.substring(0, start) + text + value.substring(end);
-        element.selectionStart = element.selectionEnd = start + text.length;
+        const newCursorPos = start + text.length;
+        element.selectionStart = element.selectionEnd = newCursorPos;
 
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
         console.log('Utter PTT: Inserted into input/textarea');
+
+        // Track insertion info for replacement during refinement
+        lastInsertionInfo = {
+          element: element,
+          startPos: start,
+          length: text.length,
+          text: text,
+          isContentEditable: false
+        };
       }
     } catch (err) {
       console.error('Utter PTT: Error inserting text:', err);
@@ -320,13 +391,6 @@
     }
   }
 
-  function updateIndicator(message) {
-    const indicator = document.getElementById(INDICATOR_ID);
-    if (indicator) {
-      indicator.textContent = message;
-    }
-  }
-
   function removeIndicator() {
     const indicator = document.getElementById(INDICATOR_ID);
     if (indicator) {
@@ -339,6 +403,239 @@
     window.__utterSessionText = '';
     removeIndicator();
     removeRecognitionFrame();
+  }
+
+  function replaceLastInsertion(refinedText) {
+    // Check both local tracking (from PTT mode) and global tracking (from toggle mode)
+    const insertionInfo = lastInsertionInfo || window.__utterLastInsertionInfo;
+
+    if (!insertionInfo) {
+      console.warn('Utter PTT: No insertion info, using regular insert');
+      return false;
+    }
+
+    const { element, startPos, length, text, isContentEditable } = insertionInfo;
+
+    // Verify element is still valid
+    if (!element || !document.body.contains(element)) {
+      console.warn('Utter PTT: Last insertion element no longer valid');
+      return false;
+    }
+
+    try {
+      element.focus();
+
+      if (isContentEditable) {
+        // For contenteditable, try to find and replace the last inserted text
+        const currentText = element.textContent || '';
+        const lastIndex = currentText.lastIndexOf(text);
+
+        if (lastIndex !== -1) {
+          // Select the text to replace
+          const selection = window.getSelection();
+          const range = document.createRange();
+
+          // Find the text node and position
+          let charCount = 0;
+          let startNode = null;
+          let startOffset = 0;
+          let endNode = null;
+          let endOffset = 0;
+
+          const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+          );
+
+          while (walker.nextNode()) {
+            const node = walker.currentNode;
+            const nodeLength = node.textContent.length;
+
+            if (charCount + nodeLength >= lastIndex && !startNode) {
+              startNode = node;
+              startOffset = lastIndex - charCount;
+            }
+
+            if (charCount + nodeLength >= lastIndex + text.length) {
+              endNode = node;
+              endOffset = (lastIndex + text.length) - charCount;
+              break;
+            }
+
+            charCount += nodeLength;
+          }
+
+          if (startNode && endNode) {
+            range.setStart(startNode, startOffset);
+            range.setEnd(endNode, endOffset);
+            range.deleteContents();
+            range.insertNode(document.createTextNode(refinedText));
+            range.collapse(false);
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            // Update tracking (both local and global)
+            if (lastInsertionInfo) lastInsertionInfo.text = refinedText;
+            if (window.__utterLastInsertionInfo) window.__utterLastInsertionInfo.text = refinedText;
+            return true;
+          }
+        }
+
+        // Fallback to regular insert
+        return false;
+      } else {
+        // For input/textarea, we can precisely replace
+        const value = element.value || '';
+
+        // Verify the text is still there at the expected position
+        const expectedEnd = startPos + length;
+        if (value.substring(startPos, expectedEnd) === text) {
+          // Replace the exact range
+          element.value = value.substring(0, startPos) + refinedText + value.substring(expectedEnd);
+          element.selectionStart = element.selectionEnd = startPos + refinedText.length;
+
+          element.dispatchEvent(new Event('input', { bubbles: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+
+          // Update tracking (both local and global)
+          if (lastInsertionInfo) {
+            lastInsertionInfo.length = refinedText.length;
+            lastInsertionInfo.text = refinedText;
+          }
+          if (window.__utterLastInsertionInfo) {
+            window.__utterLastInsertionInfo.length = refinedText.length;
+            window.__utterLastInsertionInfo.text = refinedText;
+          }
+
+          console.log('Utter PTT: Replaced text at position', startPos);
+          return true;
+        } else {
+          console.warn('Utter PTT: Text at tracked position does not match, cannot replace');
+          return false;
+        }
+      }
+    } catch (err) {
+      console.error('Utter PTT: Error replacing text:', err);
+      return false;
+    }
+  }
+
+  async function startRefinement() {
+    if (!isContextValid()) {
+      showIndicator('Extension updated - reload page', true);
+      isRefinementKeyHeld = false;
+      return;
+    }
+
+    // Check if we have a recent transcription to refine
+    // Check both PTT mode entry and toggle mode entry (from content.js)
+    const entryToRefine = lastTranscriptionEntry || window.__utterLastTranscription;
+
+    if (!entryToRefine) {
+      showIndicator('No recent transcription to refine', true);
+      isRefinementKeyHeld = false;
+      return;
+    }
+
+    // Validate that the text is not empty
+    if (!entryToRefine.text || entryToRefine.text.trim() === '') {
+      showIndicator('No text to refine', true);
+      isRefinementKeyHeld = false;
+      return;
+    }
+
+    const targetElement = document.activeElement;
+    const isTextInput =
+      (targetElement.tagName === 'INPUT' && isTextInputType(targetElement.type)) ||
+      targetElement.tagName === 'TEXTAREA' ||
+      targetElement.isContentEditable;
+
+    if (!isTextInput) {
+      showIndicator('Focus on a text field first', true);
+      isRefinementKeyHeld = false;
+      return;
+    }
+
+    // Update existing indicator or show new one
+    const existingIndicator = document.getElementById(INDICATOR_ID);
+    if (existingIndicator) {
+      existingIndicator.textContent = 'Refining text...';
+      existingIndicator.style.backgroundColor = '#3b82f6';
+      existingIndicator.style.color = '#ffffff';
+    } else {
+      showIndicator('Refining text...');
+    }
+
+    try {
+      // Dynamically import the refinement service
+      const { refineWithPreset, refineWithCustomPrompt, PRESET_PROMPTS } = await import(
+        chrome.runtime.getURL('refinement-service.js')
+      );
+
+      const promptId = settings.selectedRefinementPrompt;
+      let refinedText;
+
+      // Check if it's a preset or custom prompt
+      if (PRESET_PROMPTS[promptId]) {
+        refinedText = await refineWithPreset(entryToRefine.text, promptId);
+      } else {
+        // Get custom prompt
+        const result = await chrome.storage.local.get(['customRefinementPrompts']);
+        const customPrompts = result.customRefinementPrompts || [];
+        const customPrompt = customPrompts.find(p => p.id === promptId);
+
+        if (customPrompt) {
+          refinedText = await refineWithCustomPrompt(entryToRefine.text, customPrompt.prompt);
+        } else {
+          throw new Error('Selected prompt not found');
+        }
+      }
+
+      // Replace the last inserted text with refined text
+      const replaced = replaceLastInsertion(refinedText);
+
+      // If replacement failed (no tracking info or element changed), insert normally
+      if (!replaced) {
+        console.log('Utter PTT: Replacement failed, inserting refined text');
+        insertText(targetElement, refinedText);
+      }
+
+      // Update the history entry with refined text
+      await updateHistoryWithRefinement(entryToRefine.id, refinedText);
+
+      // Update indicator instead of removing/recreating
+      const indicator = document.getElementById(INDICATOR_ID);
+      if (indicator) {
+        indicator.textContent = 'Text refined!';
+        indicator.style.backgroundColor = '#10b981';
+        setTimeout(() => removeIndicator(), 1500);
+      }
+
+      isRefinementKeyHeld = false;
+    } catch (err) {
+      console.error('Utter PTT: Error refining text:', err);
+      showIndicator(`Refinement failed: ${err.message}`, true);
+      isRefinementKeyHeld = false;
+    }
+  }
+
+  async function updateHistoryWithRefinement(entryId, refinedText) {
+    if (!isContextValid()) return;
+    try {
+      const result = await chrome.storage.local.get(['utterHistory']);
+      const history = result.utterHistory || [];
+
+      const entry = history.find(e => e.id === entryId);
+      if (entry) {
+        entry.refinedText = refinedText;
+        await chrome.storage.local.set({ utterHistory: history });
+        console.log('Utter PTT: Updated history with refined text');
+      }
+    } catch (err) {
+      console.error('Utter PTT: Error updating history with refinement:', err);
+    }
   }
 
   async function saveToHistory(text, audioDataUrl = null) {
@@ -365,6 +662,9 @@
 
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
       console.log('Utter PTT: Saved to history with audio:', !!audioDataUrl);
+
+      // Save this as the last transcription for potential refinement
+      lastTranscriptionEntry = entry;
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         contextInvalidated = true;

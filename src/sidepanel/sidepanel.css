@@ -203,6 +203,39 @@ h1 {
   word-wrap: break-word;
 }
 
+.history-item-text-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-item-text-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-item-text-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6b7280;
+}
+
+.history-item-text-label.refined {
+  color: #059669;
+}
+
+.history-item-text.original {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.history-item-text.refined {
+  font-weight: 500;
+}
+
 .confirm-dialog {
   position: fixed;
   top: 0;

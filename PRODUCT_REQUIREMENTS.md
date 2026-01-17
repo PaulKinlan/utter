@@ -231,6 +231,193 @@ function downloadAudio(item) {
 
 ---
 
+### v1.5 - AI-Powered Text Refinement
+
+**Description:** After transcribing voice input, users can press a refinement hotkey to automatically improve the text using Chrome's built-in Prompt API (Gemini Nano). The AI can remove filler words, fix grammar, or change the tone to be more formal or friendly.
+
+**User Flow:**
+1. User completes voice transcription using hotkey or push-to-talk
+2. User presses the refinement hotkey (default: Alt+R)
+3. AI processes the transcription using the selected refinement style
+4. Refined text replaces the original text in the input field
+5. History entry is updated to show both original and refined versions
+
+**User Benefits:**
+- Automatically clean up "ums", "uhs", and other filler words
+- Improve grammar and punctuation without manual editing
+- Quickly adjust tone (formal for professional emails, friendly for casual messages)
+- Create custom refinement prompts for specific use cases
+- Compare original and refined text in history for review
+
+**Technical Requirements:**
+- Chrome Prompt API (Gemini Nano) via `window.ai.languageModel`
+- Available from Chrome 138+ for extensions
+- Settings stored in `chrome.storage.local`:
+  - `refinementEnabled` (boolean)
+  - `selectedRefinementPrompt` (string - preset ID or custom prompt ID)
+  - `refinementPttKeyCombo` (object - key combination for refinement trigger)
+  - `customRefinementPrompts` (array - user-defined refinement prompts)
+- Preset refinement styles:
+  - **Remove Filler Words** - Strip "um", "uh", "like", etc.
+  - **Basic Cleanup** - Remove fillers + fix basic grammar
+  - **Make Formal** - Professional, business-appropriate tone
+  - **Make Friendly** - Warm, conversational tone
+  - **Make Concise** - Shorten while preserving meaning
+- Custom prompt creation via options page modal
+- Refinement hotkey listener in `ptt-listener.js` (works with both toggle and PTT modes)
+- Dynamic import of `refinement-service.js` to avoid loading AI code unless needed
+
+**Implementation Details:**
+
+**Refinement Service (`refinement-service.js`):**
+```javascript
+// Check API availability
+const availability = await window.ai.languageModel.capabilities();
+
+// Create session with low temperature for consistency
+const session = await window.ai.languageModel.create({
+  temperature: 0.3,
+  topK: 3
+});
+
+// Refine text with preset prompt
+const result = await session.prompt(`
+You are a text refinement assistant. ${presetPrompt.systemPrompt}
+
+Original text:
+${text}
+`);
+
+session.destroy();
+return result.trim();
+```
+
+**Storage Schema Update:**
+```json
+{
+  "refinementEnabled": true,
+  "selectedRefinementPrompt": "basic-cleanup",
+  "refinementPttKeyCombo": {
+    "ctrlKey": false,
+    "shiftKey": false,
+    "altKey": true,
+    "metaKey": false,
+    "key": "r",
+    "code": "KeyR"
+  },
+  "customRefinementPrompts": [
+    {
+      "id": "custom-1234567890",
+      "name": "Make Technical",
+      "description": "Use technical jargon and precise language",
+      "prompt": "Rephrase using technical terminology..."
+    }
+  ],
+  "utterHistory": [
+    {
+      "id": "unique-id",
+      "text": "Um so like I think we should uh probably fix the bug",
+      "refinedText": "I think we should fix the bug.", // NEW FIELD
+      "timestamp": 1234567890,
+      "url": "https://example.com/page",
+      "audioDataUrl": "data:audio/webm;base64,..."
+    }
+  ]
+}
+```
+
+**Refinement Trigger Flow:**
+1. User completes transcription (PTT or toggle mode)
+2. Transcription entry saved to `lastTranscriptionEntry` (ptt-listener.js) or `window.__utterLastTranscription` (content.js)
+3. User presses refinement hotkey (e.g., Alt+R)
+4. `ptt-listener.js` detects key combo match
+5. Validates:
+   - Refinement is enabled
+   - Recent transcription exists
+   - Active element is a text input
+6. Shows "Refining text..." indicator
+7. Dynamically imports `refinement-service.js`
+8. Calls appropriate refinement function based on selected prompt
+9. Inserts refined text into active input field
+10. Updates history entry with `refinedText` field
+11. Shows "Text refined!" success indicator
+
+**Options Page UI:**
+- "Enable text refinement" checkbox
+- Refinement style dropdown with preset options
+- Custom prompts section:
+  - List of user-created prompts with name, description
+  - "Add Custom Prompt" button opens modal
+  - Modal fields: Name, Description, Prompt Instructions
+  - Delete button for each custom prompt
+- Refinement hotkey recorder (same UI as PTT hotkey)
+- AI availability status indicator:
+  - ✓ Available and ready
+  - ⚠ Model will download on first use
+  - ✗ Not available (unsupported hardware/browser)
+
+**History Entry Display:**
+When `refinedText` exists, sidepanel shows both versions:
+```
+┌────────────────────────────────────────┐
+│  ORIGINAL                              │
+│  "Um so like I think we should uh      │
+│   probably fix the bug"                │
+│  (grayed out, italic)                  │
+│                                        │
+│  REFINED                               │
+│  "I think we should fix the bug."      │
+│  (normal weight, green label)          │
+└────────────────────────────────────────┘
+```
+
+**Download Behavior:**
+When downloading text with refinement, the `.txt` file contains both versions:
+```
+ORIGINAL:
+Um so like I think we should uh probably fix the bug
+
+---
+
+REFINED:
+I think we should fix the bug.
+```
+
+**Preset Prompts Structure:**
+```javascript
+export const PRESET_PROMPTS = {
+  'remove-filler': {
+    id: 'remove-filler',
+    name: 'Remove Filler Words',
+    description: 'Remove ums, uhs, and other filler words',
+    systemPrompt: 'Remove filler words like "um", "uh", "like"...'
+  },
+  // ... more presets
+};
+```
+
+**Permissions Needed:**
+- None - Prompt API is available to all extensions by default in Chrome 138+
+- Note: The origin trial permission `aiLanguageModelOriginTrial` has been deprecated
+
+**Browser Compatibility:**
+- Chrome 138+ (stable)
+- Requires supported hardware:
+  - Windows 10/11
+  - macOS 13+ (Ventura and onwards)
+  - Linux
+  - ChromeOS Chromebook Plus with 22GB free storage
+- Not available on mobile devices
+- Language support (Chrome 140+): English, Spanish, Japanese
+
+**Error Handling:**
+- API not available: Show clear error message in options, disable refinement features
+- Refinement fails: Show "Refinement failed: {error}" indicator, keep original text
+- No recent transcription: Show "No recent transcription to refine" indicator
+- Session timeout: Automatically destroy session and retry once
+
+---
+
 ## Architecture
 
 ### Iframe-Based Speech Recognition Architecture

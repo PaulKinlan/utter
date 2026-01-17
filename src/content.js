@@ -198,6 +198,13 @@
           }
         }
         console.log('Utter: Inserted into contenteditable');
+
+        // Track insertion for contenteditable (best effort) - share with ptt-listener.js
+        window.__utterLastInsertionInfo = {
+          element: element,
+          text: text,
+          isContentEditable: true
+        };
       } else {
         // For input/textarea elements
         const start = element.selectionStart ?? element.value?.length ?? 0;
@@ -205,11 +212,21 @@
         const value = element.value || '';
 
         element.value = value.substring(0, start) + text + value.substring(end);
-        element.selectionStart = element.selectionEnd = start + text.length;
+        const newCursorPos = start + text.length;
+        element.selectionStart = element.selectionEnd = newCursorPos;
 
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
         console.log('Utter: Inserted into input/textarea');
+
+        // Track insertion info for replacement during refinement - share with ptt-listener.js
+        window.__utterLastInsertionInfo = {
+          element: element,
+          startPos: start,
+          length: text.length,
+          text: text,
+          isContentEditable: false
+        };
       }
     } catch (err) {
       console.error('Utter: Error inserting text:', err);
@@ -286,6 +303,10 @@
 
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
       console.log('Utter: Saved to history with audio:', !!audioDataUrl);
+
+      // Store this as the last transcription globally for refinement
+      // This allows the refinement hotkey (in ptt-listener.js) to work with toggle mode transcriptions
+      window.__utterLastTranscription = entry;
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         return;

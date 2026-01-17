@@ -15,6 +15,12 @@ export default [
         setTimeout: 'readonly',
         URL: 'readonly',
         Date: 'readonly',
+        NodeFilter: 'readonly',
+        MediaRecorder: 'readonly',
+        Blob: 'readonly',
+        FileReader: 'readonly',
+        requestAnimationFrame: 'readonly',
+        cancelAnimationFrame: 'readonly',
       },
     },
     rules: {
