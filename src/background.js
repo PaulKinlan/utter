@@ -1,5 +1,7 @@
 // Service worker for the extension
 
+import { refineWithPreset, refineWithCustomPrompt, checkAvailability, PRESET_PROMPTS } from './refinement-service.js';
+
 console.log('Utter service worker loaded');
 
 // Open side panel when extension icon is clicked
@@ -34,7 +36,7 @@ chrome.commands.onCommand.addListener(async (command) => {
   }
 });
 
-// Handle messages from sidepanel (for settings requests)
+// Handle messages from content scripts and sidepanel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Utter Background: Received message:', message, 'from:', sender);
 
@@ -52,7 +54,63 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true; // Will respond asynchronously
   }
+
+  // Handle text refinement requests from content scripts
+  if (message.type === 'refine-text') {
+    handleRefineText(message).then(result => {
+      sendResponse(result);
+    }).catch(err => {
+      console.error('Utter Background: Error refining text:', err);
+      sendResponse({ error: err.message || 'Refinement failed' });
+    });
+    return true; // Will respond asynchronously
+  }
+
+  // Handle availability check requests
+  if (message.type === 'check-refinement-availability') {
+    checkAvailability().then(result => {
+      sendResponse(result);
+    }).catch(err => {
+      console.error('Utter Background: Error checking availability:', err);
+      sendResponse({ available: false, reason: err.message });
+    });
+    return true; // Will respond asynchronously
+  }
+
+  // Handle get presets request
+  if (message.type === 'get-refinement-presets') {
+    sendResponse({ presets: PRESET_PROMPTS });
+    return false;
+  }
 });
+
+/**
+ * Handle text refinement request
+ */
+async function handleRefineText(message) {
+  const { text, presetId, customPrompt } = message;
+
+  if (!text) {
+    throw new Error('No text to refine');
+  }
+
+  // Check availability first
+  const availability = await checkAvailability();
+  if (!availability.available) {
+    throw new Error(availability.reason || 'AI not available');
+  }
+
+  let refinedText;
+  if (customPrompt) {
+    refinedText = await refineWithCustomPrompt(text, customPrompt);
+  } else if (presetId) {
+    refinedText = await refineWithPreset(text, presetId);
+  } else {
+    throw new Error('No preset or custom prompt specified');
+  }
+
+  return { refinedText };
+}
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   if (details.reason === 'install') {

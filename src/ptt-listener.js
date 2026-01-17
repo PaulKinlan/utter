@@ -569,25 +569,43 @@
     }
 
     try {
-      // Dynamically import the refinement service
-      const { refineWithPreset, refineWithCustomPrompt, PRESET_PROMPTS } = await import(
-        chrome.runtime.getURL('refinement-service.js')
-      );
-
       const promptId = settings.selectedRefinementPrompt;
       let refinedText;
 
       // Check if it's a preset or custom prompt
+      // Get presets from background service worker
+      const presetsResponse = await chrome.runtime.sendMessage({ type: 'get-refinement-presets' });
+      const PRESET_PROMPTS = presetsResponse?.presets || {};
+
       if (PRESET_PROMPTS[promptId]) {
-        refinedText = await refineWithPreset(entryToRefine.text, promptId);
+        // Use preset - send to service worker
+        const response = await chrome.runtime.sendMessage({
+          type: 'refine-text',
+          text: entryToRefine.text,
+          presetId: promptId
+        });
+
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        refinedText = response.refinedText;
       } else {
-        // Get custom prompt
+        // Get custom prompt and send to service worker
         const result = await chrome.storage.local.get(['customRefinementPrompts']);
         const customPrompts = result.customRefinementPrompts || [];
         const customPrompt = customPrompts.find(p => p.id === promptId);
 
         if (customPrompt) {
-          refinedText = await refineWithCustomPrompt(entryToRefine.text, customPrompt.prompt);
+          const response = await chrome.runtime.sendMessage({
+            type: 'refine-text',
+            text: entryToRefine.text,
+            customPrompt: customPrompt.prompt
+          });
+
+          if (response.error) {
+            throw new Error(response.error);
+          }
+          refinedText = response.refinedText;
         } else {
           throw new Error('Selected prompt not found');
         }
