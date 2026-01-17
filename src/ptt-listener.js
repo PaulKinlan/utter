@@ -16,6 +16,7 @@
 
   let isKeyHeld = false;
   let isRefinementKeyHeld = false;
+  let isRefinementRecording = false; // Track if current recording is for refinement
   let contextInvalidated = false;
   let recognitionFrame = null;
   let lastTranscriptionEntry = null; // Track last transcription for refinement
@@ -90,7 +91,10 @@
 
       case 'recognition-result':
         if (message.finalTranscript) {
-          insertText(window.__utterTargetElement, message.finalTranscript);
+          // In refinement mode, we accumulate but don't insert yet
+          if (!isRefinementRecording) {
+            insertText(window.__utterTargetElement, message.finalTranscript);
+          }
           // Accumulate text for this session
           window.__utterSessionText = (window.__utterSessionText || '') + message.finalTranscript;
         }
@@ -106,12 +110,111 @@
         break;
 
       case 'recognition-ended':
-        // Save accumulated text with audio data
-        if (window.__utterSessionText) {
+        // Handle refinement mode - refine text before saving/inserting
+        if (isRefinementRecording && window.__utterSessionText) {
+          handleRefinementComplete(window.__utterSessionText, message.audioDataUrl);
+        } else if (window.__utterSessionText) {
+          // Normal mode - save accumulated text with audio data
           saveToHistory(window.__utterSessionText, message.audioDataUrl);
         }
         cleanup();
         break;
+    }
+  }
+
+  async function handleRefinementComplete(text, audioDataUrl) {
+    showIndicator('Refining text...');
+
+    try {
+      const promptId = settings.selectedRefinementPrompt;
+      let refinedText;
+
+      // Get presets from background service worker
+      const presetsResponse = await chrome.runtime.sendMessage({ type: 'get-refinement-presets' });
+      const PRESET_PROMPTS = presetsResponse?.presets || {};
+
+      if (PRESET_PROMPTS[promptId]) {
+        // Use preset - send to service worker
+        const response = await chrome.runtime.sendMessage({
+          type: 'refine-text',
+          text: text,
+          presetId: promptId
+        });
+
+        if (response.error) {
+          throw new Error(response.error);
+        }
+        refinedText = response.refinedText;
+      } else {
+        // Get custom prompt and send to service worker
+        const result = await chrome.storage.local.get(['customRefinementPrompts']);
+        const customPrompts = result.customRefinementPrompts || [];
+        const customPrompt = customPrompts.find(p => p.id === promptId);
+
+        if (customPrompt) {
+          const response = await chrome.runtime.sendMessage({
+            type: 'refine-text',
+            text: text,
+            customPrompt: customPrompt.prompt
+          });
+
+          if (response.error) {
+            throw new Error(response.error);
+          }
+          refinedText = response.refinedText;
+        } else {
+          throw new Error('Selected prompt not found');
+        }
+      }
+
+      // Insert the refined text
+      insertText(window.__utterTargetElement, refinedText);
+
+      // Save to history with both original and refined text
+      await saveToHistoryWithRefinement(text, refinedText, audioDataUrl);
+
+      showIndicator('Text refined!');
+      setTimeout(() => removeIndicator(), 1500);
+    } catch (err) {
+      console.error('Utter PTT: Error refining text:', err);
+      // Fall back to inserting original text
+      insertText(window.__utterTargetElement, text);
+      saveToHistory(text, audioDataUrl);
+      showIndicator(`Refinement failed: ${err.message}`, true);
+    }
+  }
+
+  async function saveToHistoryWithRefinement(originalText, refinedText, audioDataUrl) {
+    if (!isContextValid()) return;
+    try {
+      const result = await chrome.storage.local.get(['utterHistory']);
+      const history = result.utterHistory || [];
+
+      const entry = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        text: originalText,
+        refinedText: refinedText,
+        timestamp: Date.now(),
+        url: window.location.href
+      };
+
+      if (audioDataUrl) {
+        entry.audioDataUrl = audioDataUrl;
+      }
+
+      history.unshift(entry);
+
+      // Keep only last 100 entries
+      if (history.length > 100) {
+        history.pop();
+      }
+
+      await chrome.storage.local.set({ utterHistory: history });
+      console.log('Utter PTT: Saved to history with refinement');
+
+      lastTranscriptionEntry = entry;
+    } catch (err) {
+      console.error('Utter PTT: Error saving to history:', err);
     }
   }
 
@@ -171,8 +274,9 @@
     if (!isRefinementKeyHeld) return;
 
     if (isPartOfCombo(e, settings.refinementPttKeyCombo)) {
-      console.log('Utter PTT: Refinement key released');
+      console.log('Utter PTT: Refinement key released, stopping recording');
       isRefinementKeyHeld = false;
+      stopRefinementRecording();
     }
   }, true);
 
@@ -401,6 +505,7 @@
   function cleanup() {
     window.__utterTargetElement = null;
     window.__utterSessionText = '';
+    isRefinementRecording = false;
     removeIndicator();
     removeRecognitionFrame();
   }
@@ -529,23 +634,6 @@
       return;
     }
 
-    // Check if we have a recent transcription to refine
-    // Check both PTT mode entry and toggle mode entry (from content.js)
-    const entryToRefine = lastTranscriptionEntry || window.__utterLastTranscription;
-
-    if (!entryToRefine) {
-      showIndicator('No recent transcription to refine', true);
-      isRefinementKeyHeld = false;
-      return;
-    }
-
-    // Validate that the text is not empty
-    if (!entryToRefine.text || entryToRefine.text.trim() === '') {
-      showIndicator('No text to refine', true);
-      isRefinementKeyHeld = false;
-      return;
-    }
-
     const targetElement = document.activeElement;
     const isTextInput =
       (targetElement.tagName === 'INPUT' && isTextInputType(targetElement.type)) ||
@@ -558,102 +646,28 @@
       return;
     }
 
-    // Update existing indicator or show new one
-    const existingIndicator = document.getElementById(INDICATOR_ID);
-    if (existingIndicator) {
-      existingIndicator.textContent = 'Refining text...';
-      existingIndicator.style.backgroundColor = '#3b82f6';
-      existingIndicator.style.color = '#ffffff';
-    } else {
-      showIndicator('Refining text...');
-    }
+    // Set up for refinement recording (same as PTT but with refinement flag)
+    window.__utterTargetElement = targetElement;
+    window.__utterSessionText = '';
+    isRefinementRecording = true;
 
-    try {
-      const promptId = settings.selectedRefinementPrompt;
-      let refinedText;
-
-      // Check if it's a preset or custom prompt
-      // Get presets from background service worker
-      const presetsResponse = await chrome.runtime.sendMessage({ type: 'get-refinement-presets' });
-      const PRESET_PROMPTS = presetsResponse?.presets || {};
-
-      if (PRESET_PROMPTS[promptId]) {
-        // Use preset - send to service worker
-        const response = await chrome.runtime.sendMessage({
-          type: 'refine-text',
-          text: entryToRefine.text,
-          presetId: promptId
-        });
-
-        if (response.error) {
-          throw new Error(response.error);
-        }
-        refinedText = response.refinedText;
-      } else {
-        // Get custom prompt and send to service worker
-        const result = await chrome.storage.local.get(['customRefinementPrompts']);
-        const customPrompts = result.customRefinementPrompts || [];
-        const customPrompt = customPrompts.find(p => p.id === promptId);
-
-        if (customPrompt) {
-          const response = await chrome.runtime.sendMessage({
-            type: 'refine-text',
-            text: entryToRefine.text,
-            customPrompt: customPrompt.prompt
-          });
-
-          if (response.error) {
-            throw new Error(response.error);
-          }
-          refinedText = response.refinedText;
-        } else {
-          throw new Error('Selected prompt not found');
-        }
-      }
-
-      // Replace the last inserted text with refined text
-      const replaced = replaceLastInsertion(refinedText);
-
-      // If replacement failed (no tracking info or element changed), insert normally
-      if (!replaced) {
-        console.log('Utter PTT: Replacement failed, inserting refined text');
-        insertText(targetElement, refinedText);
-      }
-
-      // Update the history entry with refined text
-      await updateHistoryWithRefinement(entryToRefine.id, refinedText);
-
-      // Update indicator instead of removing/recreating
-      const indicator = document.getElementById(INDICATOR_ID);
-      if (indicator) {
-        indicator.textContent = 'Text refined!';
-        indicator.style.backgroundColor = '#10b981';
-        setTimeout(() => removeIndicator(), 1500);
-      }
-
-      isRefinementKeyHeld = false;
-    } catch (err) {
-      console.error('Utter PTT: Error refining text:', err);
-      showIndicator(`Refinement failed: ${err.message}`, true);
-      isRefinementKeyHeld = false;
-    }
+    // Create iframe for speech recognition
+    createRecognitionFrame();
   }
 
-  async function updateHistoryWithRefinement(entryId, refinedText) {
-    if (!isContextValid()) return;
-    try {
-      const result = await chrome.storage.local.get(['utterHistory']);
-      const history = result.utterHistory || [];
-
-      const entry = history.find(e => e.id === entryId);
-      if (entry) {
-        entry.refinedText = refinedText;
-        await chrome.storage.local.set({ utterHistory: history });
-        console.log('Utter PTT: Updated history with refined text');
-      }
-    } catch (err) {
-      console.error('Utter PTT: Error updating history with refinement:', err);
+  function stopRefinementRecording() {
+    // Send stop message to iframe (same as stopRecognition)
+    if (recognitionFrame?.contentWindow) {
+      recognitionFrame.contentWindow.postMessage({
+        target: 'utter-recognition-frame',
+        type: 'stop'
+      }, '*');
     }
+
+    // Give iframe a moment to send final results, then remove
+    setTimeout(() => {
+      removeRecognitionFrame();
+    }, 100);
   }
 
   async function saveToHistory(text, audioDataUrl = null) {
