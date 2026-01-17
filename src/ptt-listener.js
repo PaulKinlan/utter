@@ -391,13 +391,6 @@
     }
   }
 
-  function updateIndicator(message) {
-    const indicator = document.getElementById(INDICATOR_ID);
-    if (indicator) {
-      indicator.textContent = message;
-    }
-  }
-
   function removeIndicator() {
     const indicator = document.getElementById(INDICATOR_ID);
     if (indicator) {
@@ -484,7 +477,6 @@
             selection.addRange(range);
 
             // Update tracking (both local and global)
-            const updatedInfo = { ...insertionInfo, text: refinedText };
             if (lastInsertionInfo) lastInsertionInfo.text = refinedText;
             if (window.__utterLastInsertionInfo) window.__utterLastInsertionInfo.text = refinedText;
             return true;
