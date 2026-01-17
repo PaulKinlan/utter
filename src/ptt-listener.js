@@ -10,13 +10,14 @@
     activationMode: 'toggle',
     pttKeyCombo: null,
     refinementEnabled: true,
-    refinementPttKeyCombo: null,
-    selectedRefinementPrompt: 'basic-cleanup'
+    refinementHotkeys: {},           // Per-style hotkeys: { promptId: keyCombo }
+    customRefinementPrompts: []      // Custom prompts with embedded hotkeys
   };
 
   let isKeyHeld = false;
   let isRefinementKeyHeld = false;
   let isRefinementRecording = false; // Track if current recording is for refinement
+  let activeRefinementPromptId = null; // Track which refinement prompt triggered the recording
   let contextInvalidated = false;
   let recognitionFrame = null;
   let lastTranscriptionEntry = null; // Track last transcription for refinement
@@ -44,11 +45,11 @@
     if (changes.refinementEnabled) {
       settings.refinementEnabled = changes.refinementEnabled.newValue;
     }
-    if (changes.refinementPttKeyCombo) {
-      settings.refinementPttKeyCombo = changes.refinementPttKeyCombo.newValue;
+    if (changes.refinementHotkeys) {
+      settings.refinementHotkeys = changes.refinementHotkeys.newValue || {};
     }
-    if (changes.selectedRefinementPrompt) {
-      settings.selectedRefinementPrompt = changes.selectedRefinementPrompt.newValue;
+    if (changes.customRefinementPrompts) {
+      settings.customRefinementPrompts = changes.customRefinementPrompts.newValue || [];
     }
   });
 
@@ -59,14 +60,14 @@
         'activationMode',
         'pttKeyCombo',
         'refinementEnabled',
-        'refinementPttKeyCombo',
-        'selectedRefinementPrompt'
+        'refinementHotkeys',
+        'customRefinementPrompts'
       ]);
       settings.activationMode = result.activationMode || 'toggle';
       settings.pttKeyCombo = result.pttKeyCombo || null;
       settings.refinementEnabled = result.refinementEnabled !== false;
-      settings.refinementPttKeyCombo = result.refinementPttKeyCombo || null;
-      settings.selectedRefinementPrompt = result.selectedRefinementPrompt || 'basic-cleanup';
+      settings.refinementHotkeys = result.refinementHotkeys || {};
+      settings.customRefinementPrompts = result.customRefinementPrompts || [];
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         contextInvalidated = true;
@@ -130,7 +131,12 @@
     showIndicator('Refining text...');
 
     try {
-      const promptId = settings.selectedRefinementPrompt;
+      // Use the prompt ID that triggered this refinement
+      const promptId = activeRefinementPromptId;
+      if (!promptId) {
+        throw new Error('No refinement prompt selected');
+      }
+
       let refinedText;
 
       // Get presets from background service worker
@@ -256,20 +262,23 @@
     }
   }, true);
 
-  // Listen for refinement PTT keydown
+  // Listen for refinement PTT keydown (supports multiple per-style hotkeys)
   document.addEventListener('keydown', async (e) => {
     if (!isContextValid()) return;
     if (!settings.refinementEnabled) return;
-    if (!settings.refinementPttKeyCombo) return;
-    if (!matchesCombo(e, settings.refinementPttKeyCombo)) return;
+
+    // Check all configured refinement hotkeys
+    const matchedPromptId = findMatchingRefinementHotkey(e);
+    if (!matchedPromptId) return;
 
     e.preventDefault();
     e.stopPropagation();
 
     if (isRefinementKeyHeld) return;
     isRefinementKeyHeld = true;
+    activeRefinementPromptId = matchedPromptId;
 
-    console.log('Utter PTT: Refinement key pressed, starting refinement');
+    console.log('Utter PTT: Refinement key pressed for prompt:', matchedPromptId);
     await startRefinement();
   }, true);
 
@@ -277,15 +286,59 @@
   document.addEventListener('keyup', (e) => {
     if (!isContextValid()) return;
     if (!settings.refinementEnabled) return;
-    if (!settings.refinementPttKeyCombo) return;
     if (!isRefinementKeyHeld) return;
+    if (!activeRefinementPromptId) return;
 
-    if (isPartOfCombo(e, settings.refinementPttKeyCombo)) {
+    // Find the active hotkey combo to check if this keyup is part of it
+    const activeCombo = getHotkeyForPrompt(activeRefinementPromptId);
+    if (!activeCombo) return;
+
+    if (isPartOfCombo(e, activeCombo)) {
       console.log('Utter PTT: Refinement key released, stopping recording');
       isRefinementKeyHeld = false;
       stopRefinementRecording();
     }
   }, true);
+
+  /**
+   * Find which refinement prompt matches the pressed key combo
+   * @returns {string|null} The prompt ID or null if no match
+   */
+  function findMatchingRefinementHotkey(e) {
+    // Check preset hotkeys
+    for (const [promptId, combo] of Object.entries(settings.refinementHotkeys)) {
+      if (combo && matchesCombo(e, combo)) {
+        return promptId;
+      }
+    }
+
+    // Check custom prompt hotkeys
+    for (const customPrompt of settings.customRefinementPrompts) {
+      if (customPrompt.hotkey && matchesCombo(e, customPrompt.hotkey)) {
+        return customPrompt.id;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get the hotkey combo for a given prompt ID
+   */
+  function getHotkeyForPrompt(promptId) {
+    // Check presets
+    if (settings.refinementHotkeys[promptId]) {
+      return settings.refinementHotkeys[promptId];
+    }
+
+    // Check custom prompts
+    const customPrompt = settings.customRefinementPrompts.find(p => p.id === promptId);
+    if (customPrompt?.hotkey) {
+      return customPrompt.hotkey;
+    }
+
+    return null;
+  }
 
   function matchesCombo(e, combo) {
     return (
@@ -513,6 +566,7 @@
     window.__utterTargetElement = null;
     window.__utterSessionText = '';
     isRefinementRecording = false;
+    activeRefinementPromptId = null;
     removeIndicator();
     removeRecognitionFrame();
   }

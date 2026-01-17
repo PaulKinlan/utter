@@ -103,28 +103,18 @@
 
       <div id="refinement-settings">
         <div class="field">
-          <label for="refinement-prompt">Refinement Style</label>
-          <select id="refinement-prompt">
-            <option value="">Loading prompts...</option>
-          </select>
-          <p class="description" id="prompt-description"></p>
-        </div>
-
-        <div class="field">
           <label>Custom Prompts</label>
           <div id="custom-prompts-list"></div>
           <button id="add-custom-prompt" class="secondary">Add Custom Prompt</button>
         </div>
 
         <div class="field">
-          <label for="refinement-ptt-combo">Refinement Hotkey</label>
-          <p class="description">Press this after transcription to refine the last text. Default: <kbd>Alt+R</kbd></p>
-          <div class="key-recorder">
-            <input type="text" id="refinement-ptt-combo" readonly placeholder="Click Record to set">
-            <button id="record-refinement-combo" class="secondary">Record</button>
-            <button id="clear-refinement-combo" class="secondary">Clear</button>
+          <label>Refinement Hotkeys</label>
+          <p class="description">Assign hotkeys to refinement styles. Hold the hotkey to record, then release to transcribe and refine with that style.</p>
+          <div id="refinement-hotkeys-list" class="refinement-hotkeys-list">
+            <!-- Populated dynamically -->
           </div>
-          <p id="refinement-ptt-status" class="status"></p>
+          <p id="refinement-hotkey-status" class="status"></p>
         </div>
 
         <div class="field">

@@ -130,18 +130,70 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       audioVolume: 0.5,
       refinementEnabled: false,
       selectedRefinementPrompt: 'basic-cleanup',
-      refinementPttKeyCombo: {
-        ctrlKey: false,
-        shiftKey: false,
-        altKey: true,
-        metaKey: false,
-        key: 'r',
-        code: 'KeyR'
+      // Per-style refinement hotkeys (only basic-cleanup has default)
+      refinementHotkeys: {
+        'basic-cleanup': {
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: true,
+          metaKey: false,
+          key: 'r',
+          code: 'KeyR'
+        },
+        'remove-filler': null,
+        'formal': null,
+        'friendly': null,
+        'concise': null
       },
       customRefinementPrompts: []
     };
 
     await chrome.storage.local.set(defaults);
     console.log('Default settings applied');
+  }
+
+  // Migration for existing users: convert refinementPttKeyCombo to refinementHotkeys
+  if (details.reason === 'update') {
+    console.log('Utter extension updated, checking for migration...');
+
+    const result = await chrome.storage.local.get(['refinementPttKeyCombo', 'refinementHotkeys']);
+
+    // Migrate old single hotkey to new per-style hotkeys
+    if (result.refinementPttKeyCombo && !result.refinementHotkeys) {
+      console.log('Migrating refinementPttKeyCombo to refinementHotkeys');
+
+      const refinementHotkeys = {
+        'basic-cleanup': result.refinementPttKeyCombo,
+        'remove-filler': null,
+        'formal': null,
+        'friendly': null,
+        'concise': null
+      };
+
+      await chrome.storage.local.set({ refinementHotkeys });
+      await chrome.storage.local.remove('refinementPttKeyCombo');
+
+      console.log('Migration complete');
+    }
+
+    // Ensure refinementHotkeys exists for users who never had refinementPttKeyCombo
+    if (!result.refinementHotkeys && !result.refinementPttKeyCombo) {
+      const refinementHotkeys = {
+        'basic-cleanup': {
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: true,
+          metaKey: false,
+          key: 'r',
+          code: 'KeyR'
+        },
+        'remove-filler': null,
+        'formal': null,
+        'friendly': null,
+        'concise': null
+      };
+      await chrome.storage.local.set({ refinementHotkeys });
+      console.log('Created default refinementHotkeys');
+    }
   }
 });

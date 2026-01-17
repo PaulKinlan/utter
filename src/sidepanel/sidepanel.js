@@ -15,7 +15,17 @@ let history = [];
 let toggleShortcut = null;
 let pttKeyCombo = null;
 let refinementEnabled = false;
-let refinementPttKeyCombo = null;
+let refinementHotkeys = {};
+let customRefinementPrompts = [];
+
+// Preset prompt names for display
+const PRESET_NAMES = {
+  'basic-cleanup': 'Basic Cleanup',
+  'remove-filler': 'Remove Filler',
+  'formal': 'Formal',
+  'friendly': 'Friendly',
+  'concise': 'Concise'
+};
 
 // Speech recognition state
 let recognition = null;
@@ -87,15 +97,15 @@ async function loadShortcuts() {
     const result = await chrome.storage.local.get([
       'pttKeyCombo',
       'refinementEnabled',
-      'refinementPttKeyCombo'
+      'refinementHotkeys',
+      'customRefinementPrompts'
     ]);
     if (result.pttKeyCombo) {
       pttKeyCombo = result.pttKeyCombo;
     }
     refinementEnabled = result.refinementEnabled === true;
-    if (result.refinementPttKeyCombo) {
-      refinementPttKeyCombo = result.refinementPttKeyCombo;
-    }
+    refinementHotkeys = result.refinementHotkeys || {};
+    customRefinementPrompts = result.customRefinementPrompts || [];
   } catch (err) {
     console.error('Utter Sidepanel: Error loading shortcuts:', err);
   }
@@ -130,8 +140,15 @@ function setupStorageListeners() {
         renderHistory();
       }
     }
-    if (changes.refinementPttKeyCombo) {
-      refinementPttKeyCombo = changes.refinementPttKeyCombo.newValue || null;
+    if (changes.refinementHotkeys) {
+      refinementHotkeys = changes.refinementHotkeys.newValue || {};
+      // Re-render if showing empty state to update shortcuts display
+      if (history.length === 0) {
+        renderHistory();
+      }
+    }
+    if (changes.customRefinementPrompts) {
+      customRefinementPrompts = changes.customRefinementPrompts.newValue || [];
       // Re-render if showing empty state to update shortcuts display
       if (history.length === 0) {
         renderHistory();
@@ -562,15 +579,42 @@ function renderShortcuts(container) {
     container.appendChild(pttItem);
   }
 
-  // Refinement shortcut (only show if refinement is enabled)
-  if (refinementEnabled && refinementPttKeyCombo) {
-    const refinementDisplay = formatKeyCombo(refinementPttKeyCombo);
-    const refinementItem = createShortcutItem('Refine & Insert', refinementDisplay);
-    container.appendChild(refinementItem);
+  // Refinement shortcuts (only show if refinement is enabled)
+  if (refinementEnabled) {
+    let hasAnyRefinementHotkey = false;
+
+    // Show preset refinement hotkeys
+    for (const [promptId, combo] of Object.entries(refinementHotkeys)) {
+      if (combo) {
+        const displayName = PRESET_NAMES[promptId] || promptId;
+        const hotkeyDisplay = formatKeyCombo(combo);
+        const hotkeyItem = createShortcutItem(`Refine: ${displayName}`, hotkeyDisplay);
+        container.appendChild(hotkeyItem);
+        hasAnyRefinementHotkey = true;
+      }
+    }
+
+    // Show custom prompt hotkeys
+    for (const customPrompt of customRefinementPrompts) {
+      if (customPrompt.hotkey) {
+        const hotkeyDisplay = formatKeyCombo(customPrompt.hotkey);
+        const hotkeyItem = createShortcutItem(`Refine: ${customPrompt.name}`, hotkeyDisplay);
+        container.appendChild(hotkeyItem);
+        hasAnyRefinementHotkey = true;
+      }
+    }
+
+    // If refinement is enabled but no hotkeys are set, show hint
+    if (!hasAnyRefinementHotkey) {
+      const hint = document.createElement('p');
+      hint.className = 'shortcut-not-set';
+      hint.textContent = 'Configure refinement hotkeys in Settings';
+      container.appendChild(hint);
+    }
   }
 
-  // If no shortcuts are set, show a hint
-  if (!toggleShortcut && !pttKeyCombo) {
+  // If no shortcuts are set at all, show a hint
+  if (!toggleShortcut && !pttKeyCombo && !refinementEnabled) {
     const hint = document.createElement('p');
     hint.className = 'shortcut-not-set';
     hint.textContent = 'Configure shortcuts in Settings';

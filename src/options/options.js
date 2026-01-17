@@ -32,15 +32,15 @@ const testSoundBtn = document.getElementById('test-sound');
 const refinementEnabledCheckbox = document.getElementById('refinement-enabled');
 const refinementDownloadStatus = document.getElementById('refinement-download-status');
 const refinementSettings = document.getElementById('refinement-settings');
-const refinementPromptSelect = document.getElementById('refinement-prompt');
-const promptDescription = document.getElementById('prompt-description');
 const customPromptsList = document.getElementById('custom-prompts-list');
 const addCustomPromptBtn = document.getElementById('add-custom-prompt');
-const refinementPttComboInput = document.getElementById('refinement-ptt-combo');
-const recordRefinementComboBtn = document.getElementById('record-refinement-combo');
-const clearRefinementComboBtn = document.getElementById('clear-refinement-combo');
-const refinementPttStatus = document.getElementById('refinement-ptt-status');
+const refinementHotkeysList = document.getElementById('refinement-hotkeys-list');
+const refinementHotkeyStatus = document.getElementById('refinement-hotkey-status');
 const apiStatus = document.getElementById('api-status');
+
+
+// Chrome commands for conflict detection
+let chromeCommands = [];
 
 // Modal elements
 const customPromptModal = document.getElementById('custom-prompt-modal');
@@ -51,7 +51,7 @@ const saveCustomPromptBtn = document.getElementById('save-custom-prompt');
 const cancelCustomPromptBtn = document.getElementById('cancel-custom-prompt');
 
 let isRecording = false;
-let isRecordingRefinement = false;
+let activeRecordingPromptId = null; // Track which prompt hotkey is being recorded
 
 // Chrome doesn't allow direct links to chrome:// URLs, so we handle it
 shortcutsLink.addEventListener('click', (e) => {
@@ -64,12 +64,49 @@ init();
 
 async function init() {
   await loadDevices();
+  await loadChromeCommands();
   await loadSavedSettings();
   await checkApiAvailability();
   await loadRefinementPrompts();
+  await renderRefinementHotkeys();
 
   // Re-enumerate devices when permission changes
   navigator.mediaDevices.addEventListener('devicechange', loadDevices);
+}
+
+async function loadChromeCommands() {
+  try {
+    chromeCommands = await chrome.commands.getAll();
+  } catch (err) {
+    console.error('Error loading Chrome commands:', err);
+    chromeCommands = [];
+  }
+}
+
+function detectConflict(combo) {
+  if (!combo) return null;
+
+  // Format combo to match Chrome's format (e.g., "Ctrl+Shift+U")
+  const parts = [];
+  if (combo.ctrlKey) parts.push('Ctrl');
+  if (combo.altKey) parts.push('Alt');
+  if (combo.shiftKey) parts.push('Shift');
+  if (combo.metaKey) parts.push('Command');
+
+  let keyDisplay = combo.key.toUpperCase();
+  if (combo.key === ' ') keyDisplay = 'Space';
+  parts.push(keyDisplay);
+
+  const formatted = parts.join('+');
+
+  // Check against Chrome commands
+  for (const cmd of chromeCommands) {
+    if (cmd.shortcut && cmd.shortcut.toUpperCase() === formatted.toUpperCase()) {
+      return cmd.description || cmd.name;
+    }
+  }
+
+  return null;
 }
 
 async function loadDevices() {
@@ -140,8 +177,7 @@ async function loadSavedSettings() {
       'soundFeedbackEnabled',
       'audioVolume',
       'refinementEnabled',
-      'selectedRefinementPrompt',
-      'refinementPttKeyCombo'
+      'selectedRefinementPrompt'
     ]);
 
     if (result.selectedMicrophone) {
@@ -171,10 +207,7 @@ async function loadSavedSettings() {
     refinementEnabledCheckbox.checked = refinementEnabled;
     updateRefinementSettingsUI(refinementEnabled);
 
-    // Set refinement PTT key combo
-    if (result.refinementPttKeyCombo) {
-      refinementPttComboInput.value = formatKeyCombo(result.refinementPttKeyCombo);
-    }
+    // Refinement hotkeys are loaded separately in renderRefinementHotkeys()
   } catch (err) {
     console.error('Error loading settings:', err);
   }
@@ -453,78 +486,9 @@ function updateRefinementSettingsUI(enabled) {
   }
 }
 
-// Refinement prompt selection change
-refinementPromptSelect.addEventListener('change', async () => {
-  const promptId = refinementPromptSelect.value;
-  updatePromptDescription(promptId);
-
-  try {
-    await chrome.storage.local.set({ selectedRefinementPrompt: promptId });
-    showSaveStatus();
-  } catch (err) {
-    console.error('Error saving refinement prompt:', err);
-  }
-});
-
-async function updatePromptDescription(promptId) {
-  const preset = PRESET_PROMPTS[promptId];
-  if (preset) {
-    promptDescription.textContent = preset.description;
-  } else {
-    // Check if it's a custom prompt
-    try {
-      const result = await chrome.storage.local.get(['customRefinementPrompts']);
-      const customPrompts = result.customRefinementPrompts || [];
-      const customPrompt = customPrompts.find(p => p.id === promptId);
-      if (customPrompt) {
-        promptDescription.textContent = customPrompt.description;
-      } else {
-        promptDescription.textContent = '';
-      }
-    } catch (err) {
-      console.error('Error loading custom prompt description:', err);
-      promptDescription.textContent = '';
-    }
-  }
-}
-
 async function loadRefinementPrompts() {
   try {
     const prompts = await getAvailablePrompts();
-    const result = await chrome.storage.local.get(['selectedRefinementPrompt']);
-    const selectedPrompt = result.selectedRefinementPrompt || 'basic-cleanup';
-
-    // Clear existing options
-    refinementPromptSelect.innerHTML = '';
-
-    // Add preset prompts
-    const presetsGroup = document.createElement('optgroup');
-    presetsGroup.label = 'Preset Styles';
-    prompts.presets.forEach(preset => {
-      const option = document.createElement('option');
-      option.value = preset.id;
-      option.textContent = preset.name;
-      presetsGroup.appendChild(option);
-    });
-    refinementPromptSelect.appendChild(presetsGroup);
-
-    // Add custom prompts if any
-    if (prompts.custom.length > 0) {
-      const customGroup = document.createElement('optgroup');
-      customGroup.label = 'Custom Prompts';
-      prompts.custom.forEach(prompt => {
-        const option = document.createElement('option');
-        option.value = prompt.id;
-        option.textContent = prompt.name;
-        customGroup.appendChild(option);
-      });
-      refinementPromptSelect.appendChild(customGroup);
-    }
-
-    // Set selected prompt
-    refinementPromptSelect.value = selectedPrompt;
-    updatePromptDescription(selectedPrompt);
-
     // Render custom prompts list
     renderCustomPrompts(prompts.custom);
   } catch (err) {
@@ -590,6 +554,7 @@ async function deleteCustomPrompt(promptId) {
 
     showSaveStatus();
     await loadRefinementPrompts();
+    await renderRefinementHotkeys();
   } catch (err) {
     console.error('Error deleting custom prompt:', err);
   }
@@ -640,6 +605,7 @@ saveCustomPromptBtn.addEventListener('click', async () => {
     customPromptModal.classList.add('hidden');
     showSaveStatus();
     await loadRefinementPrompts();
+    await renderRefinementHotkeys();
   } catch (err) {
     console.error('Error saving custom prompt:', err);
   }
@@ -657,80 +623,240 @@ customPromptModal.addEventListener('click', (e) => {
   }
 });
 
-// Refinement PTT key combo recording
-recordRefinementComboBtn.addEventListener('click', () => {
-  if (isRecordingRefinement) {
-    stopRecordingRefinement();
-  } else {
-    startRecordingRefinement();
-  }
-});
+// Render per-style refinement hotkeys
+async function renderRefinementHotkeys() {
+  refinementHotkeysList.innerHTML = '';
 
-clearRefinementComboBtn.addEventListener('click', async () => {
-  refinementPttComboInput.value = '';
   try {
-    await chrome.storage.local.remove('refinementPttKeyCombo');
-    showSaveStatus();
-    showRefinementPttStatus('Refinement hotkey cleared', 'success');
+    const result = await chrome.storage.local.get(['refinementHotkeys', 'customRefinementPrompts']);
+    const refinementHotkeys = result.refinementHotkeys || {};
+    const customPrompts = result.customRefinementPrompts || [];
+
+    // Render preset hotkeys
+    for (const [presetId, preset] of Object.entries(PRESET_PROMPTS)) {
+      const combo = refinementHotkeys[presetId] || null;
+      renderHotkeyItem(presetId, preset.name, preset.description, combo, false);
+    }
+
+    // Render custom prompt hotkeys
+    for (const customPrompt of customPrompts) {
+      const combo = customPrompt.hotkey || null;
+      renderHotkeyItem(customPrompt.id, customPrompt.name, customPrompt.description, combo, true);
+    }
   } catch (err) {
-    console.error('Error clearing refinement key combo:', err);
+    console.error('Error loading refinement hotkeys:', err);
   }
-});
-
-function startRecordingRefinement() {
-  isRecordingRefinement = true;
-  recordRefinementComboBtn.textContent = 'Press keys...';
-  refinementPttComboInput.classList.add('recording');
-  refinementPttComboInput.value = '';
-  refinementPttComboInput.placeholder = 'Press your key combination...';
-  document.addEventListener('keydown', handleRefinementKeyDown);
 }
 
-function stopRecordingRefinement() {
-  isRecordingRefinement = false;
-  recordRefinementComboBtn.textContent = 'Record';
-  refinementPttComboInput.classList.remove('recording');
-  refinementPttComboInput.placeholder = 'Click Record to set';
-  document.removeEventListener('keydown', handleRefinementKeyDown);
-}
+function renderHotkeyItem(promptId, promptName, description, combo, isCustom) {
+  const item = document.createElement('div');
+  item.className = 'hotkey-item' + (isCustom ? ' custom' : '');
+  item.dataset.promptId = promptId;
 
-async function handleRefinementKeyDown(e) {
-  e.preventDefault();
-  e.stopPropagation();
+  const labelContainer = document.createElement('div');
+  labelContainer.className = 'hotkey-label-container';
 
-  // Ignore lone modifier keys
-  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
-    return;
+  const label = document.createElement('span');
+  label.className = 'hotkey-label';
+  label.textContent = promptName;
+  labelContainer.appendChild(label);
+
+  if (description) {
+    const desc = document.createElement('span');
+    desc.className = 'hotkey-description';
+    desc.textContent = description;
+    labelContainer.appendChild(desc);
   }
 
-  const combo = {
-    ctrlKey: e.ctrlKey,
-    shiftKey: e.shiftKey,
-    altKey: e.altKey,
-    metaKey: e.metaKey,
-    key: e.key,
-    code: e.code
+  const keyRecorder = document.createElement('div');
+  keyRecorder.className = 'key-recorder';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.readOnly = true;
+  input.placeholder = 'Not set';
+  input.value = combo ? formatKeyCombo(combo) : '';
+  input.dataset.promptId = promptId;
+
+  const recordBtn = document.createElement('button');
+  recordBtn.textContent = 'Record';
+  recordBtn.className = 'secondary';
+  recordBtn.addEventListener('click', () => startRecordingHotkey(promptId, input, recordBtn));
+
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'Clear';
+  clearBtn.className = 'secondary';
+  clearBtn.addEventListener('click', () => clearHotkey(promptId, input, isCustom));
+
+  keyRecorder.appendChild(input);
+  keyRecorder.appendChild(recordBtn);
+  keyRecorder.appendChild(clearBtn);
+
+  const conflictIndicator = document.createElement('span');
+  conflictIndicator.className = 'conflict-indicator';
+  conflictIndicator.dataset.promptId = promptId;
+
+  // Check for initial conflict
+  if (combo) {
+    const conflict = detectConflict(combo);
+    if (conflict) {
+      conflictIndicator.textContent = `⚠ Conflicts with: ${conflict}`;
+      conflictIndicator.classList.add('visible');
+    }
+  }
+
+  item.appendChild(labelContainer);
+  item.appendChild(keyRecorder);
+  item.appendChild(conflictIndicator);
+
+  refinementHotkeysList.appendChild(item);
+}
+
+function startRecordingHotkey(promptId, inputElement, recordBtn) {
+  // Stop any existing recording
+  if (activeRecordingPromptId) {
+    stopRecordingHotkey(activeRecordingPromptId);
+  }
+
+  activeRecordingPromptId = promptId;
+  recordBtn.textContent = 'Press keys...';
+  inputElement.classList.add('recording');
+  inputElement.value = '';
+  inputElement.placeholder = 'Press key combo...';
+
+  const keyDownHandler = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Ignore lone modifier keys
+    if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+      return;
+    }
+
+    const combo = {
+      ctrlKey: e.ctrlKey,
+      shiftKey: e.shiftKey,
+      altKey: e.altKey,
+      metaKey: e.metaKey,
+      key: e.key,
+      code: e.code
+    };
+
+    document.removeEventListener('keydown', keyDownHandler);
+    activeRecordingPromptId = null;
+    recordBtn.textContent = 'Record';
+    inputElement.classList.remove('recording');
+    inputElement.placeholder = 'Not set';
+    inputElement.value = formatKeyCombo(combo);
+
+    // Save the hotkey
+    await saveHotkey(promptId, combo);
+
+    // Check for conflict
+    const conflictIndicator = document.querySelector(`.conflict-indicator[data-prompt-id="${promptId}"]`);
+    const conflict = detectConflict(combo);
+    if (conflict) {
+      conflictIndicator.textContent = `⚠ Conflicts with: ${conflict}`;
+      conflictIndicator.classList.add('visible');
+    } else {
+      conflictIndicator.textContent = '';
+      conflictIndicator.classList.remove('visible');
+    }
+
+    showRefinementHotkeyStatus('Hotkey saved!', 'success');
   };
 
-  refinementPttComboInput.value = formatKeyCombo(combo);
-  stopRecordingRefinement();
+  document.addEventListener('keydown', keyDownHandler);
 
+  // Store handler for potential cleanup
+  inputElement._keyDownHandler = keyDownHandler;
+}
+
+function stopRecordingHotkey(promptId) {
+  const input = document.querySelector(`.hotkey-item[data-prompt-id="${promptId}"] input`);
+  const recordBtn = document.querySelector(`.hotkey-item[data-prompt-id="${promptId}"] button`);
+
+  if (input && input._keyDownHandler) {
+    document.removeEventListener('keydown', input._keyDownHandler);
+    delete input._keyDownHandler;
+  }
+
+  if (recordBtn) {
+    recordBtn.textContent = 'Record';
+  }
+
+  if (input) {
+    input.classList.remove('recording');
+    input.placeholder = 'Not set';
+  }
+
+  activeRecordingPromptId = null;
+}
+
+async function saveHotkey(promptId, combo) {
   try {
-    await chrome.storage.local.set({ refinementPttKeyCombo: combo });
+    // Check if it's a custom prompt
+    if (promptId.startsWith('custom-')) {
+      const result = await chrome.storage.local.get(['customRefinementPrompts']);
+      const customPrompts = result.customRefinementPrompts || [];
+      const promptIndex = customPrompts.findIndex(p => p.id === promptId);
+      if (promptIndex >= 0) {
+        customPrompts[promptIndex].hotkey = combo;
+        await chrome.storage.local.set({ customRefinementPrompts: customPrompts });
+      }
+    } else {
+      // It's a preset prompt
+      const result = await chrome.storage.local.get(['refinementHotkeys']);
+      const refinementHotkeys = result.refinementHotkeys || {};
+      refinementHotkeys[promptId] = combo;
+      await chrome.storage.local.set({ refinementHotkeys });
+    }
     showSaveStatus();
-    showRefinementPttStatus('Refinement hotkey saved!', 'success');
   } catch (err) {
-    console.error('Error saving refinement key combo:', err);
-    showRefinementPttStatus('Error saving hotkey', 'error');
+    console.error('Error saving hotkey:', err);
+    showRefinementHotkeyStatus('Error saving hotkey', 'error');
   }
 }
 
-function showRefinementPttStatus(message, type) {
-  refinementPttStatus.textContent = message;
-  refinementPttStatus.className = `status ${type}`;
+async function clearHotkey(promptId, inputElement, isCustom) {
+  try {
+    if (isCustom) {
+      const result = await chrome.storage.local.get(['customRefinementPrompts']);
+      const customPrompts = result.customRefinementPrompts || [];
+      const promptIndex = customPrompts.findIndex(p => p.id === promptId);
+      if (promptIndex >= 0) {
+        delete customPrompts[promptIndex].hotkey;
+        await chrome.storage.local.set({ customRefinementPrompts: customPrompts });
+      }
+    } else {
+      const result = await chrome.storage.local.get(['refinementHotkeys']);
+      const refinementHotkeys = result.refinementHotkeys || {};
+      refinementHotkeys[promptId] = null;
+      await chrome.storage.local.set({ refinementHotkeys });
+    }
+
+    inputElement.value = '';
+
+    // Clear conflict indicator
+    const conflictIndicator = document.querySelector(`.conflict-indicator[data-prompt-id="${promptId}"]`);
+    if (conflictIndicator) {
+      conflictIndicator.textContent = '';
+      conflictIndicator.classList.remove('visible');
+    }
+
+    showSaveStatus();
+    showRefinementHotkeyStatus('Hotkey cleared', 'success');
+  } catch (err) {
+    console.error('Error clearing hotkey:', err);
+  }
+}
+
+function showRefinementHotkeyStatus(message, type) {
+  refinementHotkeyStatus.textContent = message;
+  refinementHotkeyStatus.className = `status ${type}`;
   setTimeout(() => {
-    refinementPttStatus.textContent = '';
-    refinementPttStatus.className = 'status';
+    refinementHotkeyStatus.textContent = '';
+    refinementHotkeyStatus.className = 'status';
   }, 3000);
 }
 
@@ -765,3 +891,4 @@ async function checkApiAvailability() {
     apiStatus.style.color = '#dc2626';
   }
 }
+
