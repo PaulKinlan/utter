@@ -286,6 +286,10 @@
 
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
       console.log('Utter: Saved to history with audio:', !!audioDataUrl);
+
+      // Store this as the last transcription globally for refinement
+      // This allows the refinement hotkey (in ptt-listener.js) to work with toggle mode transcriptions
+      window.__utterLastTranscription = entry;
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         return;

@@ -69,7 +69,18 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         key: '.',
         code: 'Period'
       },
-      audioVolume: 0.5
+      audioVolume: 0.5,
+      refinementEnabled: true,
+      selectedRefinementPrompt: 'basic-cleanup',
+      refinementPttKeyCombo: {
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: true,
+        metaKey: false,
+        key: 'r',
+        code: 'KeyR'
+      },
+      customRefinementPrompts: []
     };
 
     await chrome.storage.local.set(defaults);

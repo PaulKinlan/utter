@@ -57,7 +57,8 @@
         "audio/beep.wav",
         "audio/boop.wav",
         "recognition-frame/recognition-frame.html",
-        "recognition-frame/recognition-frame.js"
+        "recognition-frame/recognition-frame.js",
+        "refinement-service.js"
       ]
     }
   ]

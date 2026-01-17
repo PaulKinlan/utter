@@ -8,12 +8,17 @@
 
   let settings = {
     activationMode: 'toggle',
-    pttKeyCombo: null
+    pttKeyCombo: null,
+    refinementEnabled: true,
+    refinementPttKeyCombo: null,
+    selectedRefinementPrompt: 'basic-cleanup'
   };
 
   let isKeyHeld = false;
+  let isRefinementKeyHeld = false;
   let contextInvalidated = false;
   let recognitionFrame = null;
+  let lastTranscriptionEntry = null; // Track last transcription for refinement
 
   // Check if extension context is still valid
   function isContextValid() {
@@ -34,14 +39,32 @@
     if (changes.pttKeyCombo) {
       settings.pttKeyCombo = changes.pttKeyCombo.newValue;
     }
+    if (changes.refinementEnabled) {
+      settings.refinementEnabled = changes.refinementEnabled.newValue;
+    }
+    if (changes.refinementPttKeyCombo) {
+      settings.refinementPttKeyCombo = changes.refinementPttKeyCombo.newValue;
+    }
+    if (changes.selectedRefinementPrompt) {
+      settings.selectedRefinementPrompt = changes.selectedRefinementPrompt.newValue;
+    }
   });
 
   async function loadSettings() {
     if (!isContextValid()) return;
     try {
-      const result = await chrome.storage.local.get(['activationMode', 'pttKeyCombo']);
+      const result = await chrome.storage.local.get([
+        'activationMode',
+        'pttKeyCombo',
+        'refinementEnabled',
+        'refinementPttKeyCombo',
+        'selectedRefinementPrompt'
+      ]);
       settings.activationMode = result.activationMode || 'toggle';
       settings.pttKeyCombo = result.pttKeyCombo || null;
+      settings.refinementEnabled = result.refinementEnabled !== false;
+      settings.refinementPttKeyCombo = result.refinementPttKeyCombo || null;
+      settings.selectedRefinementPrompt = result.selectedRefinementPrompt || 'basic-cleanup';
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         contextInvalidated = true;
@@ -119,6 +142,36 @@
       console.log('Utter PTT: Key released, stopping recognition');
       isKeyHeld = false;
       stopRecognition();
+    }
+  }, true);
+
+  // Listen for refinement PTT keydown
+  document.addEventListener('keydown', async (e) => {
+    if (!isContextValid()) return;
+    if (!settings.refinementEnabled) return;
+    if (!settings.refinementPttKeyCombo) return;
+    if (!matchesCombo(e, settings.refinementPttKeyCombo)) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (isRefinementKeyHeld) return;
+    isRefinementKeyHeld = true;
+
+    console.log('Utter PTT: Refinement key pressed, starting refinement');
+    await startRefinement();
+  }, true);
+
+  // Listen for refinement PTT keyup
+  document.addEventListener('keyup', (e) => {
+    if (!isContextValid()) return;
+    if (!settings.refinementEnabled) return;
+    if (!settings.refinementPttKeyCombo) return;
+    if (!isRefinementKeyHeld) return;
+
+    if (isPartOfCombo(e, settings.refinementPttKeyCombo)) {
+      console.log('Utter PTT: Refinement key released');
+      isRefinementKeyHeld = false;
     }
   }, true);
 
@@ -341,6 +394,97 @@
     removeRecognitionFrame();
   }
 
+  async function startRefinement() {
+    if (!isContextValid()) {
+      showIndicator('Extension updated - reload page', true);
+      isRefinementKeyHeld = false;
+      return;
+    }
+
+    // Check if we have a recent transcription to refine
+    // Check both PTT mode entry and toggle mode entry (from content.js)
+    const entryToRefine = lastTranscriptionEntry || window.__utterLastTranscription;
+
+    if (!entryToRefine) {
+      showIndicator('No recent transcription to refine', true);
+      isRefinementKeyHeld = false;
+      return;
+    }
+
+    const targetElement = document.activeElement;
+    const isTextInput =
+      (targetElement.tagName === 'INPUT' && isTextInputType(targetElement.type)) ||
+      targetElement.tagName === 'TEXTAREA' ||
+      targetElement.isContentEditable;
+
+    if (!isTextInput) {
+      showIndicator('Focus on a text field first', true);
+      isRefinementKeyHeld = false;
+      return;
+    }
+
+    showIndicator('Refining text...');
+
+    try {
+      // Dynamically import the refinement service
+      const { refineWithPreset, refineWithCustomPrompt, PRESET_PROMPTS } = await import(
+        chrome.runtime.getURL('refinement-service.js')
+      );
+
+      const promptId = settings.selectedRefinementPrompt;
+      let refinedText;
+
+      // Check if it's a preset or custom prompt
+      if (PRESET_PROMPTS[promptId]) {
+        refinedText = await refineWithPreset(entryToRefine.text, promptId);
+      } else {
+        // Get custom prompt
+        const result = await chrome.storage.local.get(['customRefinementPrompts']);
+        const customPrompts = result.customRefinementPrompts || [];
+        const customPrompt = customPrompts.find(p => p.id === promptId);
+
+        if (customPrompt) {
+          refinedText = await refineWithCustomPrompt(entryToRefine.text, customPrompt.prompt);
+        } else {
+          throw new Error('Selected prompt not found');
+        }
+      }
+
+      // Insert the refined text
+      insertText(targetElement, refinedText);
+
+      // Update the history entry with refined text
+      await updateHistoryWithRefinement(entryToRefine.id, refinedText);
+
+      removeIndicator();
+      showIndicator('Text refined!');
+      setTimeout(() => removeIndicator(), 1500);
+
+      isRefinementKeyHeld = false;
+    } catch (err) {
+      console.error('Utter PTT: Error refining text:', err);
+      showIndicator(`Refinement failed: ${err.message}`, true);
+      isRefinementKeyHeld = false;
+    }
+  }
+
+  async function updateHistoryWithRefinement(entryId, refinedText) {
+    if (!isContextValid()) return;
+    try {
+      const result = await chrome.storage.local.get(['utterHistory']);
+      const history = result.utterHistory || [];
+
+      const entry = history.find(e => e.id === entryId);
+      if (entry) {
+        entry.refinedText = refinedText;
+        await chrome.storage.local.set({ utterHistory: history });
+        console.log('Utter PTT: Updated history with refined text');
+      }
+    } catch (err) {
+      console.error('Utter PTT: Error updating history with refinement:', err);
+    }
+  }
+
   async function saveToHistory(text, audioDataUrl = null) {
     if (!isContextValid()) return;
     try {
@@ -365,6 +509,9 @@
 
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
       console.log('Utter PTT: Saved to history with audio:', !!audioDataUrl);
+
+      // Save this as the last transcription for potential refinement
+      lastTranscriptionEntry = entry;
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         contextInvalidated = true;

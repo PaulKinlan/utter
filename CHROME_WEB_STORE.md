@@ -18,6 +18,8 @@ Utter is a lightweight Chrome extension that brings voice-to-text input to any w
 
 • **Universal Voice Input** — Works in any text field on any website. Write emails, fill forms, compose documents, or chat — all by speaking.
 
+• **AI-Powered Text Refinement** — After transcribing, press Alt+R to automatically improve your text using Chrome's built-in AI (Gemini Nano). Remove "ums" and "uhs", fix grammar, or change the tone to be more formal or friendly. Choose from preset styles or create custom refinement prompts. Both original and refined versions are saved in your history.
+
 • **Two Activation Modes:**
   - **Toggle Mode** — Press Ctrl+Shift+U (Cmd+Shift+U on Mac) to start listening, press again to stop
   - **Push-to-Talk** — Hold your custom key combination while speaking, release to stop. Perfect for quick voice inputs.
@@ -32,7 +34,7 @@ Utter is a lightweight Chrome extension that brings voice-to-text input to any w
 
 • **Audio Feedback** — Optional sounds let you know when voice recognition starts and stops.
 
-• **Privacy Focused** — All speech processing uses Chrome's built-in Web Speech API. Your voice data is processed by Google's speech recognition service (the same service used by Google Search voice input) but is never stored by Utter. No account required, no data collection.
+• **Privacy Focused** — All speech processing uses Chrome's built-in Web Speech API. Text refinement uses Chrome's built-in AI (Gemini Nano), which runs entirely on your device. Your voice data is processed by Google's speech recognition service (the same service used by Google Search voice input) but is never stored by Utter. No account required, no data collection.
 
 **How to Use:**
 
@@ -104,8 +106,9 @@ We use `activeTab` instead of broader host permissions to minimize access — th
 1. Activation mode preference (toggle vs push-to-talk)
 2. Custom push-to-talk key combination
 3. Selected microphone device ID
-4. Voice input history (transcriptions, timestamps, page URLs, and audio recordings)
+4. Voice input history (transcriptions, timestamps, page URLs, audio recordings, and refined text)
 5. Audio recordings stored as WebM files (base64 encoded) for playback
+6. Text refinement preferences (enabled/disabled, selected refinement style, refinement hotkey, custom refinement prompts)
 
 All data is stored locally using `chrome.storage.local` and is never transmitted to external servers.
 
@@ -193,7 +196,17 @@ Required screenshots to create:
 
 ## Version History
 
-### v1.1.0 (Current)
+### v1.2.0 (Current)
+- **NEW:** AI-powered text refinement using Chrome's built-in Prompt API (Gemini Nano)
+- **NEW:** 5 preset refinement styles: Remove Filler Words, Basic Cleanup, Make Formal, Make Friendly, Make Concise
+- **NEW:** Custom refinement prompt creation — create and save your own refinement styles
+- **NEW:** Refinement hotkey (default: Alt+R) to improve text after transcription
+- **NEW:** History entries now show both original and refined text side-by-side
+- **NEW:** Download refined transcriptions as text files with both versions
+- Enhanced options page with AI availability status indicator
+- Improved sidepanel UI with refined text display
+
+### v1.1.0
 - **NEW:** Audio recording and playback — Automatically record audio during voice input sessions
 - **NEW:** Inline audio player with real-time frequency visualizer
 - **NEW:** Download transcriptions as text files
@@ -233,20 +246,29 @@ Required screenshots to create:
 
 ## Review Notes for Chrome Web Store Team
 
-This extension uses the Web Speech Recognition API (webkitSpeechRecognition) for voice-to-text functionality. Key implementation details:
+This extension uses the Web Speech Recognition API (webkitSpeechRecognition) for voice-to-text functionality and the Chrome Prompt API (Gemini Nano) for optional text refinement. Key implementation details:
 
 1. **Microphone access** is requested via an iframe with `allow="microphone"` attribute, which enables speech recognition to work on any page regardless of the page's own permissions.
 
-2. **Content script on all URLs** (`<all_urls>`) is required solely for push-to-talk functionality — the script listens for the user's configured key combination and does not interact with page content otherwise.
+2. **Content script on all URLs** (`<all_urls>`) is required solely for push-to-talk functionality and refinement hotkey — the script listens for the user's configured key combinations and does not interact with page content otherwise.
 
-3. **No remote code** — All JavaScript is bundled with the extension.
+3. **Chrome Prompt API** is used for text refinement (v1.2.0+). The AI runs entirely on-device using Chrome's built-in Gemini Nano model. No API keys or remote servers required. Users can disable this feature in options.
 
-4. **No data collection** — The extension stores user preferences and history locally only. Voice data is processed by Chrome's built-in speech recognition service.
+4. **No remote code** — All JavaScript is bundled with the extension.
 
-To test:
+5. **No data collection** — The extension stores user preferences and history locally only. Voice data is processed by Chrome's built-in speech recognition service. Text refinement is processed by Chrome's on-device AI.
+
+To test voice input:
 1. Install the extension
 2. Grant microphone permission when prompted
 3. Focus on a text field (e.g., Google search box)
 4. Press Ctrl+Shift+U (Windows/Linux) or Cmd+Shift+U (Mac)
 5. Speak and observe transcription
 6. Press the hotkey again to stop
+
+To test AI text refinement:
+1. After completing a voice transcription
+2. Focus on a text field
+3. Press Alt+R (default refinement hotkey)
+4. Observe the text being automatically improved
+5. Check the side panel history to see both original and refined versions

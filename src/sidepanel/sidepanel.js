@@ -831,11 +831,23 @@ function formatDuration(seconds) {
 }
 
 function downloadText(item) {
-  const blob = new Blob([item.text], { type: 'text/plain' });
+  // If refined text exists, create a file with both versions
+  let content;
+  let filename;
+
+  if (item.refinedText) {
+    content = `ORIGINAL:\n${item.text}\n\n---\n\nREFINED:\n${item.refinedText}`;
+    filename = `transcription-refined-${item.id}.txt`;
+  } else {
+    content = item.text;
+    filename = `transcription-${item.id}.txt`;
+  }
+
+  const blob = new Blob([content], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `transcription-${item.id}.txt`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -889,10 +901,47 @@ function createHistoryItem(item) {
 
   div.appendChild(header);
 
-  const text = document.createElement('p');
-  text.className = 'history-item-text';
-  text.textContent = item.text;
-  div.appendChild(text);
+  // If refined text exists, show both original and refined
+  if (item.refinedText) {
+    const textContainer = document.createElement('div');
+    textContainer.className = 'history-item-text-container';
+
+    const originalSection = document.createElement('div');
+    originalSection.className = 'history-item-text-section';
+
+    const originalLabel = document.createElement('div');
+    originalLabel.className = 'history-item-text-label';
+    originalLabel.textContent = 'Original';
+    originalSection.appendChild(originalLabel);
+
+    const originalText = document.createElement('p');
+    originalText.className = 'history-item-text original';
+    originalText.textContent = item.text;
+    originalSection.appendChild(originalText);
+
+    const refinedSection = document.createElement('div');
+    refinedSection.className = 'history-item-text-section';
+
+    const refinedLabel = document.createElement('div');
+    refinedLabel.className = 'history-item-text-label refined';
+    refinedLabel.textContent = 'Refined';
+    refinedSection.appendChild(refinedLabel);
+
+    const refinedText = document.createElement('p');
+    refinedText.className = 'history-item-text refined';
+    refinedText.textContent = item.refinedText;
+    refinedSection.appendChild(refinedText);
+
+    textContainer.appendChild(originalSection);
+    textContainer.appendChild(refinedSection);
+    div.appendChild(textContainer);
+  } else {
+    // Show only original text
+    const text = document.createElement('p');
+    text.className = 'history-item-text';
+    text.textContent = item.text;
+    div.appendChild(text);
+  }
 
   // Add audio player if audio data exists
   if (item.audioDataUrl) {
