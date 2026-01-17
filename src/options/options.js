@@ -418,13 +418,14 @@ refinementPromptSelect.addEventListener('change', async () => {
   }
 });
 
-function updatePromptDescription(promptId) {
+async function updatePromptDescription(promptId) {
   const preset = PRESET_PROMPTS[promptId];
   if (preset) {
     promptDescription.textContent = preset.description;
   } else {
     // Check if it's a custom prompt
-    chrome.storage.local.get(['customRefinementPrompts']).then(result => {
+    try {
+      const result = await chrome.storage.local.get(['customRefinementPrompts']);
       const customPrompts = result.customRefinementPrompts || [];
       const customPrompt = customPrompts.find(p => p.id === promptId);
       if (customPrompt) {
@@ -432,7 +433,10 @@ function updatePromptDescription(promptId) {
       } else {
         promptDescription.textContent = '';
       }
-    });
+    } catch (err) {
+      console.error('Error loading custom prompt description:', err);
+      promptDescription.textContent = '';
+    }
   }
 }
 
@@ -558,16 +562,25 @@ saveCustomPromptBtn.addEventListener('click', async () => {
   const promptText = customPromptText.value.trim();
 
   if (!name || !description || !promptText) {
-    alert('Please fill in all fields');
+    // Show inline error message instead of alert
+    customPromptName.style.borderColor = !name ? '#ef4444' : '#d1d5db';
+    customPromptDescription.style.borderColor = !description ? '#ef4444' : '#d1d5db';
+    customPromptText.style.borderColor = !promptText ? '#ef4444' : '#d1d5db';
     return;
   }
+
+  // Reset border colors
+  customPromptName.style.borderColor = '#d1d5db';
+  customPromptDescription.style.borderColor = '#d1d5db';
+  customPromptText.style.borderColor = '#d1d5db';
 
   try {
     const result = await chrome.storage.local.get(['customRefinementPrompts']);
     const customPrompts = result.customRefinementPrompts || [];
 
+    // Add random component to prevent duplicate IDs if created rapidly
     const newPrompt = {
-      id: 'custom-' + Date.now(),
+      id: 'custom-' + Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9),
       name,
       description,
       prompt: promptText

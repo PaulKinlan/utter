@@ -115,8 +115,9 @@ export async function refineWithCustomPrompt(text, customPrompt, onProgress = nu
  * Core refinement function
  */
 async function refineText(text, systemPrompt, onProgress = null) {
+  let session = null;
   try {
-    const session = await createSession();
+    session = await createSession();
 
     const fullPrompt = `${systemPrompt}\n\nOriginal text:\n${text}`;
 
@@ -130,17 +131,20 @@ async function refineText(text, systemPrompt, onProgress = null) {
         onProgress(result);
       }
 
-      session.destroy();
       return result.trim();
     } else {
       // Non-streaming
       const result = await session.prompt(fullPrompt);
-      session.destroy();
       return result.trim();
     }
   } catch (err) {
     console.error('Error refining text:', err);
     throw err;
+  } finally {
+    // Always destroy session to prevent resource leak
+    if (session) {
+      session.destroy();
+    }
   }
 }
 
