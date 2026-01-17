@@ -14,6 +14,8 @@ let history = [];
 // Shortcuts info
 let toggleShortcut = null;
 let pttKeyCombo = null;
+let refinementEnabled = false;
+let refinementPttKeyCombo = null;
 
 // Speech recognition state
 let recognition = null;
@@ -81,10 +83,18 @@ async function loadShortcuts() {
       toggleShortcut = toggleCommand.shortcut;
     }
 
-    // Get push-to-talk key combo from storage
-    const result = await chrome.storage.local.get(['pttKeyCombo']);
+    // Get push-to-talk and refinement settings from storage
+    const result = await chrome.storage.local.get([
+      'pttKeyCombo',
+      'refinementEnabled',
+      'refinementPttKeyCombo'
+    ]);
     if (result.pttKeyCombo) {
       pttKeyCombo = result.pttKeyCombo;
+    }
+    refinementEnabled = result.refinementEnabled === true;
+    if (result.refinementPttKeyCombo) {
+      refinementPttKeyCombo = result.refinementPttKeyCombo;
     }
   } catch (err) {
     console.error('Utter Sidepanel: Error loading shortcuts:', err);
@@ -108,6 +118,20 @@ function setupStorageListeners() {
     }
     if (changes.pttKeyCombo) {
       pttKeyCombo = changes.pttKeyCombo.newValue || null;
+      // Re-render if showing empty state to update shortcuts display
+      if (history.length === 0) {
+        renderHistory();
+      }
+    }
+    if (changes.refinementEnabled) {
+      refinementEnabled = changes.refinementEnabled.newValue === true;
+      // Re-render if showing empty state to update shortcuts display
+      if (history.length === 0) {
+        renderHistory();
+      }
+    }
+    if (changes.refinementPttKeyCombo) {
+      refinementPttKeyCombo = changes.refinementPttKeyCombo.newValue || null;
       // Re-render if showing empty state to update shortcuts display
       if (history.length === 0) {
         renderHistory();
@@ -538,7 +562,14 @@ function renderShortcuts(container) {
     container.appendChild(pttItem);
   }
 
-  // If neither is set, show a hint
+  // Refinement shortcut (only show if refinement is enabled)
+  if (refinementEnabled && refinementPttKeyCombo) {
+    const refinementDisplay = formatKeyCombo(refinementPttKeyCombo);
+    const refinementItem = createShortcutItem('Refine & Insert', refinementDisplay);
+    container.appendChild(refinementItem);
+  }
+
+  // If no shortcuts are set, show a hint
   if (!toggleShortcut && !pttKeyCombo) {
     const hint = document.createElement('p');
     hint.className = 'shortcut-not-set';
