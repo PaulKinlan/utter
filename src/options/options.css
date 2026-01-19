@@ -537,3 +537,135 @@ button.primary:disabled {
   background: #f0fdf4;
   border-color: #bbf7d0;
 }
+
+/* Device Priority List */
+.device-priority-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.device-priority-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: grab;
+  transition: background-color 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.device-priority-item:hover {
+  background: #f9fafb;
+}
+
+.device-priority-item.connected {
+  border-left: 3px solid #10b981;
+}
+
+.device-priority-item.disconnected {
+  opacity: 0.6;
+  border-left: 3px solid #9ca3af;
+}
+
+.device-priority-item.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.device-priority-item.drag-over-top {
+  border-top: 2px solid #3b82f6;
+}
+
+.device-priority-item.drag-over-bottom {
+  border-bottom: 2px solid #3b82f6;
+}
+
+.device-priority-item .drag-handle {
+  color: #9ca3af;
+  font-size: 12px;
+  cursor: grab;
+  padding: 0 4px;
+  user-select: none;
+}
+
+.device-priority-item .device-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.device-priority-item .device-label {
+  font-weight: 500;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.device-priority-item .device-status {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.device-priority-item.connected .device-status {
+  color: #059669;
+}
+
+.device-priority-item .device-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.device-priority-item .icon-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #374151;
+}
+
+.device-priority-item .icon-btn:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+.device-priority-item .icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.device-priority-item .icon-btn.remove {
+  color: #dc2626;
+}
+
+.device-priority-item .icon-btn.remove:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.priority-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.device-count {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.description.small {
+  font-size: 12px;
+  margin-bottom: 8px;
+}

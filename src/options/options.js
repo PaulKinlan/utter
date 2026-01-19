@@ -2,12 +2,18 @@
 
 import { PRESET_PROMPTS, checkAvailability, getAvailablePrompts, ensureModelReady } from '../refinement-service.js';
 
-const microphoneSelect = document.getElementById('microphone-select');
 const microphoneField = document.getElementById('microphone-field');
+const devicePriorityList = document.getElementById('device-priority-list');
+const refreshDevicesBtn = document.getElementById('refresh-devices');
+const deviceCountEl = document.getElementById('device-count');
 const requestPermissionBtn = document.getElementById('request-permission');
 const permissionStatus = document.getElementById('permission-status');
 const saveStatus = document.getElementById('save-status');
 const shortcutsLink = document.getElementById('shortcuts-link');
+
+// Device priority state
+let devicePriority = []; // Array of { deviceId, label, lastSeen }
+let connectedDevices = new Map(); // deviceId -> { deviceId, label }
 
 // Activation mode elements
 const activationModeRadios = document.querySelectorAll('input[name="activation-mode"]');
@@ -124,14 +130,14 @@ async function loadDevices() {
     }
 
     if (!hasPermission) {
-      // Permission not granted - hide dropdown and show request button
+      // Permission not granted - hide priority list and show request button
       microphoneField.classList.add('hidden');
       requestPermissionBtn.classList.remove('hidden');
-      showPermissionStatus('Microphone permission is required to select an audio input device.', 'error');
+      showPermissionStatus('Microphone permission is required to set device priority.', 'error');
       return;
     }
 
-    // Permission granted - show dropdown and hide request button
+    // Permission granted - show priority list and hide request button
     microphoneField.classList.remove('hidden');
     requestPermissionBtn.classList.add('hidden');
     permissionStatus.textContent = '';
@@ -140,38 +146,232 @@ async function loadDevices() {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const audioInputs = devices.filter(d => d.kind === 'audioinput');
 
-    // Clear existing options
-    while (microphoneSelect.firstChild) {
-      microphoneSelect.removeChild(microphoneSelect.firstChild);
-    }
-
-    // Add default option
-    const defaultOption = document.createElement('option');
-    defaultOption.value = '';
-    defaultOption.textContent = 'System Default';
-    microphoneSelect.appendChild(defaultOption);
-
     if (audioInputs.length === 0) {
       showPermissionStatus('No microphones found.', 'error');
       return;
     }
 
+    // Update connected devices map
+    connectedDevices.clear();
     audioInputs.forEach((device, index) => {
-      const option = document.createElement('option');
-      option.value = device.deviceId;
-      option.textContent = device.label || `Microphone ${index + 1}`;
-      microphoneSelect.appendChild(option);
+      const label = device.label || `Microphone ${index + 1}`;
+      connectedDevices.set(device.deviceId, { deviceId: device.deviceId, label });
     });
+
+    // Load saved priority list
+    const result = await chrome.storage.local.get(['audioDevicePriority']);
+    devicePriority = result.audioDevicePriority || [];
+
+    // Add any new devices to the priority list (at the end)
+    const now = Date.now();
+    for (const [deviceId, device] of connectedDevices) {
+      if (!devicePriority.some(d => d.deviceId === deviceId)) {
+        devicePriority.push({
+          deviceId,
+          label: device.label,
+          lastSeen: now
+        });
+      }
+    }
+
+    // Update lastSeen for connected devices and refresh labels
+    devicePriority = devicePriority.map(d => {
+      const connected = connectedDevices.get(d.deviceId);
+      if (connected) {
+        return { ...d, label: connected.label, lastSeen: now };
+      }
+      return d;
+    });
+
+    // Save updated priority list
+    await chrome.storage.local.set({ audioDevicePriority: devicePriority });
+
+    // Render the priority list
+    renderDevicePriorityList();
   } catch (err) {
     console.error('Error enumerating devices:', err);
     showPermissionStatus('Error loading devices: ' + err.message, 'error');
   }
 }
 
+function renderDevicePriorityList() {
+  devicePriorityList.innerHTML = '';
+
+  if (devicePriority.length === 0) {
+    devicePriorityList.innerHTML = '<p class="description">No devices found. Connect a microphone and click Refresh.</p>';
+    deviceCountEl.textContent = '';
+    return;
+  }
+
+  // Count connected devices
+  const connectedCount = devicePriority.filter(d => connectedDevices.has(d.deviceId)).length;
+  deviceCountEl.textContent = `${connectedCount} of ${devicePriority.length} connected`;
+
+  devicePriority.forEach((device, index) => {
+    const isConnected = connectedDevices.has(device.deviceId);
+    const item = document.createElement('div');
+    item.className = 'device-priority-item' + (isConnected ? ' connected' : ' disconnected');
+    item.dataset.deviceId = device.deviceId;
+    item.draggable = true;
+
+    const dragHandle = document.createElement('span');
+    dragHandle.className = 'drag-handle';
+    dragHandle.textContent = '⋮⋮';
+    dragHandle.title = 'Drag to reorder';
+
+    const info = document.createElement('div');
+    info.className = 'device-info';
+
+    const label = document.createElement('span');
+    label.className = 'device-label';
+    label.textContent = device.label;
+
+    const status = document.createElement('span');
+    status.className = 'device-status';
+    status.textContent = isConnected ? 'Connected' : 'Not connected';
+
+    info.appendChild(label);
+    info.appendChild(status);
+
+    const actions = document.createElement('div');
+    actions.className = 'device-actions';
+
+    const upBtn = document.createElement('button');
+    upBtn.className = 'icon-btn';
+    upBtn.textContent = '▲';
+    upBtn.title = 'Move up';
+    upBtn.disabled = index === 0;
+    upBtn.addEventListener('click', () => moveDevice(index, -1));
+
+    const downBtn = document.createElement('button');
+    downBtn.className = 'icon-btn';
+    downBtn.textContent = '▼';
+    downBtn.title = 'Move down';
+    downBtn.disabled = index === devicePriority.length - 1;
+    downBtn.addEventListener('click', () => moveDevice(index, 1));
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'icon-btn remove';
+    removeBtn.textContent = '×';
+    removeBtn.title = 'Remove from list';
+    removeBtn.addEventListener('click', () => removeDevice(index));
+
+    actions.appendChild(upBtn);
+    actions.appendChild(downBtn);
+    actions.appendChild(removeBtn);
+
+    item.appendChild(dragHandle);
+    item.appendChild(info);
+    item.appendChild(actions);
+
+    // Drag and drop event listeners
+    item.addEventListener('dragstart', handleDragStart);
+    item.addEventListener('dragover', handleDragOver);
+    item.addEventListener('drop', handleDrop);
+    item.addEventListener('dragend', handleDragEnd);
+
+    devicePriorityList.appendChild(item);
+  });
+}
+
+let draggedItem = null;
+
+function handleDragStart(e) {
+  draggedItem = e.target.closest('.device-priority-item');
+  draggedItem.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+
+  const item = e.target.closest('.device-priority-item');
+  if (item && item !== draggedItem) {
+    const rect = item.getBoundingClientRect();
+    const midpoint = rect.top + rect.height / 2;
+    if (e.clientY < midpoint) {
+      item.classList.add('drag-over-top');
+      item.classList.remove('drag-over-bottom');
+    } else {
+      item.classList.add('drag-over-bottom');
+      item.classList.remove('drag-over-top');
+    }
+  }
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  const dropTarget = e.target.closest('.device-priority-item');
+  if (!dropTarget || dropTarget === draggedItem) return;
+
+  const draggedId = draggedItem.dataset.deviceId;
+  const targetId = dropTarget.dataset.deviceId;
+
+  const draggedIndex = devicePriority.findIndex(d => d.deviceId === draggedId);
+  const targetIndex = devicePriority.findIndex(d => d.deviceId === targetId);
+
+  if (draggedIndex === -1 || targetIndex === -1) return;
+
+  // Remove dragged item
+  const [removed] = devicePriority.splice(draggedIndex, 1);
+
+  // Determine insert position based on drop position
+  const rect = dropTarget.getBoundingClientRect();
+  const midpoint = rect.top + rect.height / 2;
+  let insertIndex = targetIndex;
+  if (e.clientY > midpoint) {
+    insertIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
+  } else {
+    insertIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  }
+
+  // Insert at new position
+  devicePriority.splice(insertIndex, 0, removed);
+
+  saveDevicePriority();
+}
+
+function handleDragEnd() {
+  if (draggedItem) {
+    draggedItem.classList.remove('dragging');
+  }
+  draggedItem = null;
+
+  // Remove all drag-over classes
+  document.querySelectorAll('.device-priority-item').forEach(item => {
+    item.classList.remove('drag-over-top', 'drag-over-bottom');
+  });
+}
+
+async function moveDevice(index, direction) {
+  const newIndex = index + direction;
+  if (newIndex < 0 || newIndex >= devicePriority.length) return;
+
+  const [removed] = devicePriority.splice(index, 1);
+  devicePriority.splice(newIndex, 0, removed);
+
+  await saveDevicePriority();
+}
+
+async function removeDevice(index) {
+  devicePriority.splice(index, 1);
+  await saveDevicePriority();
+}
+
+async function saveDevicePriority() {
+  try {
+    await chrome.storage.local.set({ audioDevicePriority: devicePriority });
+    renderDevicePriorityList();
+    showSaveStatus();
+  } catch (err) {
+    console.error('Error saving device priority:', err);
+  }
+}
+
 async function loadSavedSettings() {
   try {
     const result = await chrome.storage.local.get([
-      'selectedMicrophone',
       'activationMode',
       'pttKeyCombo',
       'soundFeedbackEnabled',
@@ -179,10 +379,6 @@ async function loadSavedSettings() {
       'refinementEnabled',
       'selectedRefinementPrompt'
     ]);
-
-    if (result.selectedMicrophone) {
-      microphoneSelect.value = result.selectedMicrophone;
-    }
 
     // Set activation mode
     const mode = result.activationMode || 'toggle';
@@ -234,16 +430,13 @@ requestPermissionBtn.addEventListener('click', async () => {
   }
 });
 
-// Save microphone selection when changed
-microphoneSelect.addEventListener('change', async () => {
-  try {
-    await chrome.storage.local.set({
-      selectedMicrophone: microphoneSelect.value
-    });
-    showSaveStatus();
-  } catch (err) {
-    console.error('Error saving settings:', err);
-  }
+// Refresh devices button
+refreshDevicesBtn.addEventListener('click', async () => {
+  refreshDevicesBtn.disabled = true;
+  refreshDevicesBtn.textContent = 'Refreshing...';
+  await loadDevices();
+  refreshDevicesBtn.disabled = false;
+  refreshDevicesBtn.textContent = 'Refresh Devices';
 });
 
 // Activation mode change
