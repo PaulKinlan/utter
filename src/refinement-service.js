@@ -113,7 +113,7 @@ export async function ensureModelReady(onStatusChange = null) {
     }
 
     // Check initial availability
-    let availability = await LanguageModel.availability();
+    const availability = await LanguageModel.availability();
 
     if (availability === 'available') {
       onStatusChange?.({ status: 'available', message: 'Ready' });
@@ -125,36 +125,37 @@ export async function ensureModelReady(onStatusChange = null) {
       return false;
     }
 
-    // Status is 'downloading' - monitor progress
-    onStatusChange?.({ status: 'downloading', message: 'Downloading model...' });
+    // Status is 'downloading' - trigger download via create() with progress monitor
+    // This approach uses the monitor callback to get real download progress
+    // instead of polling, which prevents UI blocking
+    onStatusChange?.({ status: 'downloading', message: 'Downloading model... 0%' });
 
-    // Poll for completion
-    const pollInterval = 1000; // 1 second
-    const maxWait = 300000; // 5 minutes max
-    const startTime = Date.now();
+    let session = null;
+    try {
+      session = await LanguageModel.create({
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            if (e.total > 0) {
+              const percent = Math.round((e.loaded / e.total) * 100);
+              onStatusChange?.({ status: 'downloading', message: `Downloading model... ${percent}%` });
+            }
+          });
+        }
+      });
 
-    while (Date.now() - startTime < maxWait) {
-      await new Promise(resolve => setTimeout(resolve, pollInterval));
-
-      availability = await LanguageModel.availability();
-
-      if (availability === 'available') {
-        onStatusChange?.({ status: 'available', message: 'Ready' });
-        return true;
+      // If we get here, the model is ready
+      onStatusChange?.({ status: 'available', message: 'Ready' });
+      return true;
+    } catch (createErr) {
+      console.error('Error creating session during download:', createErr);
+      onStatusChange?.({ status: 'error', message: createErr.message || 'Download failed' });
+      return false;
+    } finally {
+      // Clean up the session we created just for downloading
+      if (session) {
+        session.destroy();
       }
-
-      if (availability === 'unavailable') {
-        onStatusChange?.({ status: 'error', message: 'Download failed' });
-        return false;
-      }
-
-      // Still downloading
-      const elapsed = Math.round((Date.now() - startTime) / 1000);
-      onStatusChange?.({ status: 'downloading', message: `Downloading model... (${elapsed}s)` });
     }
-
-    onStatusChange?.({ status: 'error', message: 'Download timed out' });
-    return false;
   } catch (err) {
     console.error('Error ensuring model ready:', err);
     onStatusChange?.({ status: 'error', message: err.message || 'Unknown error' });

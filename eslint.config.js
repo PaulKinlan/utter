@@ -21,6 +21,7 @@ export default [
         FileReader: 'readonly',
         requestAnimationFrame: 'readonly',
         cancelAnimationFrame: 'readonly',
+        LanguageModel: 'readonly',
       },
     },
     rules: {
