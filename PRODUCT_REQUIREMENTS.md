@@ -53,6 +53,111 @@ Utter is a Chrome extension that provides a global hotkey to invoke the Web Spee
 
 ---
 
+### v2.1 - Audio Device Priority
+
+**Description:** Allow users to set a priority order for microphones. The extension automatically uses the highest-priority device that's currently connected, with automatic fallback to lower-priority devices.
+
+**User Flow:**
+1. User opens Options page
+2. Options page displays a reorderable priority list of all known audio devices
+3. Connected devices are highlighted; disconnected devices are shown dimmed
+4. User reorders devices using drag-and-drop or up/down arrow buttons
+5. User can remove devices from the list that are no longer needed
+6. New devices are automatically added to the bottom of the priority list when connected
+7. When starting voice input, the extension uses the highest-priority connected device
+8. If no prioritized devices are available, falls back to system default
+
+**User Benefits:**
+- Seamlessly switch between devices (e.g., headset to desk mic) based on availability
+- No manual reconfiguration needed when devices connect/disconnect
+- Preferred devices automatically take over when plugged in
+- Maintain history of all devices used across sessions
+
+**Technical Requirements:**
+- Device priority list stored in `chrome.storage.local` as `audioDevicePriority`
+- Each entry contains: `{ deviceId, label, lastSeen }`
+- Options page UI with drag-and-drop reordering and arrow buttons
+- Real-time device status (connected/disconnected) indicator
+- Automatic device discovery when new devices are connected
+- Recognition frame queries available devices and uses highest priority match
+- Graceful fallback to system default when no prioritized devices available
+
+**Storage Schema:**
+```json
+{
+  "audioDevicePriority": [
+    {
+      "deviceId": "abc123def456...",
+      "label": "Blue Yeti",
+      "lastSeen": 1706000000000
+    },
+    {
+      "deviceId": "ghi789jkl012...",
+      "label": "Headset Microphone",
+      "lastSeen": 1706000000000
+    },
+    {
+      "deviceId": "mno345pqr678...",
+      "label": "Built-in Microphone",
+      "lastSeen": 1705900000000
+    }
+  ]
+}
+```
+
+**Implementation Details:**
+
+**Options Page Device Priority List:**
+```javascript
+// Render priority list with drag-and-drop support
+function renderDevicePriorityList() {
+  devicePriority.forEach((device, index) => {
+    const isConnected = connectedDevices.has(device.deviceId);
+    // Create draggable item with status indicator
+    // Add up/down/remove buttons
+  });
+}
+
+// Reorder on drag-and-drop
+function handleDrop(e) {
+  const draggedIndex = devicePriority.findIndex(d => d.deviceId === draggedId);
+  const targetIndex = devicePriority.findIndex(d => d.deviceId === targetId);
+  const [removed] = devicePriority.splice(draggedIndex, 1);
+  devicePriority.splice(targetIndex, 0, removed);
+  saveDevicePriority();
+}
+```
+
+**Recognition Frame Device Selection:**
+```javascript
+async function getMicrophoneAccess() {
+  // Get currently connected devices
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const connectedDeviceIds = new Set(
+    devices.filter(d => d.kind === 'audioinput').map(d => d.deviceId)
+  );
+
+  // Try devices in priority order
+  for (const priorityDevice of settings.audioDevicePriority) {
+    if (connectedDeviceIds.has(priorityDevice.deviceId)) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: priorityDevice.deviceId } }
+        });
+      } catch (err) {
+        if (err.name !== 'OverconstrainedError') throw err;
+        // Continue to next device
+      }
+    }
+  }
+
+  // Fall back to system default
+  return navigator.mediaDevices.getUserMedia({ audio: true });
+}
+```
+
+---
+
 ### v1.2 - Push-to-Talk Mode
 
 **Description:** Alternative activation mode where users hold a custom key combination to talk, releasing to stop. More natural for quick voice inputs.

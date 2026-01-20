@@ -11,14 +11,19 @@
     <h1><img src="../assets/original-icon.png" alt="Utter icon" class="title-icon">Utter Options</h1>
 
     <section>
-      <h2>Microphone</h2>
-      <p class="description">Select which microphone to use for speech recognition.</p>
+      <h2>Microphone Priority</h2>
+      <p class="description">Set the priority order for microphones. The first available device in the list will be used.</p>
 
       <div class="field hidden" id="microphone-field">
-        <label for="microphone-select">Audio Input Device</label>
-        <select id="microphone-select">
-          <option value="">Loading devices...</option>
-        </select>
+        <label>Device Priority</label>
+        <p class="description small">Drag to reorder or use arrow buttons. The top device that's currently connected will be used.</p>
+        <div id="device-priority-list" class="device-priority-list">
+          <!-- Populated dynamically -->
+        </div>
+        <div class="priority-actions">
+          <button id="refresh-devices" class="secondary">Refresh Devices</button>
+          <span id="device-count" class="device-count"></span>
+        </div>
       </div>
 
       <button id="request-permission" class="secondary">Grant Microphone Permission</button>

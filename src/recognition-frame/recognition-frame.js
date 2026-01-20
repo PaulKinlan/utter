@@ -17,7 +17,7 @@ let animationId = null;
 let mediaStreamSource = null;
 let frequencyDataArray = null;
 let settings = {
-  selectedMicrophone: '',
+  audioDevicePriority: [], // Array of { deviceId, label, lastSeen }
   soundFeedbackEnabled: true,
   audioVolume: 0.5
 };
@@ -42,11 +42,22 @@ async function init() {
 async function loadSettings() {
   try {
     const result = await chrome.storage.local.get([
-      'selectedMicrophone',
+      'audioDevicePriority',
+      'selectedMicrophone', // Legacy setting for migration
       'soundFeedbackEnabled',
       'audioVolume'
     ]);
-    settings.selectedMicrophone = result.selectedMicrophone || '';
+    settings.audioDevicePriority = result.audioDevicePriority || [];
+
+    // Migrate legacy selectedMicrophone setting if priority list is empty
+    if (result.selectedMicrophone && settings.audioDevicePriority.length === 0) {
+      settings.audioDevicePriority = [{
+        deviceId: result.selectedMicrophone,
+        label: 'Migrated Device',
+        lastSeen: Date.now()
+      }];
+    }
+
     settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
     settings.audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
   } catch (err) {
@@ -65,19 +76,33 @@ function playSound(filename) {
 }
 
 async function getMicrophoneAccess() {
-  if (settings.selectedMicrophone) {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: { exact: settings.selectedMicrophone } }
-      });
-      return stream;
-    } catch (err) {
-      if (err.name !== 'OverconstrainedError') {
-        throw err;
+  // Get currently connected audio input devices
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const connectedDeviceIds = new Set(
+    devices.filter(d => d.kind === 'audioinput').map(d => d.deviceId)
+  );
+
+  // Try devices in priority order
+  for (const priorityDevice of settings.audioDevicePriority) {
+    if (connectedDeviceIds.has(priorityDevice.deviceId)) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: priorityDevice.deviceId } }
+        });
+        console.log('Utter Recognition Frame: Using device:', priorityDevice.label);
+        return stream;
+      } catch (err) {
+        if (err.name !== 'OverconstrainedError') {
+          throw err;
+        }
+        // Device not available, try next in priority list
+        console.warn('Utter Recognition Frame: Device unavailable, trying next:', priorityDevice.label);
       }
-      // Fall through to default microphone
     }
   }
+
+  // Fall back to system default
+  console.log('Utter Recognition Frame: Using system default microphone');
   return navigator.mediaDevices.getUserMedia({ audio: true });
 }
 

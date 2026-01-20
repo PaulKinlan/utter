@@ -28,7 +28,7 @@ Utter is a lightweight Chrome extension that brings voice-to-text input to any w
 
 • **Audio Recording & Playback** — Automatically records audio alongside your transcriptions. Listen back to your recordings with an inline audio visualizer, verify transcription accuracy, and download both text and audio files.
 
-• **Microphone Selection** — Choose which microphone to use in the options page. Great for users with multiple audio devices.
+• **Microphone Priority** — Set a priority order for your microphones. The extension automatically uses the highest-priority device that's connected, with seamless fallback to lower-priority devices. New devices are remembered and can be reordered anytime.
 
 • **Visual Feedback** — A small floating indicator shows when Utter is listening and displays your speech in real-time as it's transcribed.
 
@@ -196,7 +196,15 @@ Required screenshots to create:
 
 ## Version History
 
-### v1.2.0 (Current)
+### v2.1.0 (Current)
+- **NEW:** Audio device priority system — set a priority order for microphones
+- **NEW:** Automatic device selection — uses the highest-priority connected device
+- **NEW:** Seamless fallback — automatically switches to next priority device when preferred device is unavailable
+- **NEW:** Device history — remembers all previously connected devices
+- **NEW:** Drag-and-drop reordering in options page
+- Replaced single microphone dropdown with full priority list management
+
+### v2.0.0
 - **NEW:** AI-powered text refinement using Chrome's built-in Prompt API (Gemini Nano)
 - **NEW:** 5 preset refinement styles: Remove Filler Words, Basic Cleanup, Make Formal, Make Friendly, Make Concise
 - **NEW:** Custom refinement prompt creation — create and save your own refinement styles
