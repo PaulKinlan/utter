@@ -131,15 +131,21 @@ export async function ensureModelReady(onStatusChange = null) {
     onStatusChange?.({ status: 'downloading', message: 'Downloading model... 0%' });
 
     let session = null;
+    let monitorRef = null;
+    let progressHandler = null;
+
     try {
+      progressHandler = (e) => {
+        if (e.total > 0) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          onStatusChange?.({ status: 'downloading', message: `Downloading model... ${percent}%` });
+        }
+      };
+
       session = await LanguageModel.create({
         monitor(m) {
-          m.addEventListener('downloadprogress', (e) => {
-            if (e.total > 0) {
-              const percent = Math.round((e.loaded / e.total) * 100);
-              onStatusChange?.({ status: 'downloading', message: `Downloading model... ${percent}%` });
-            }
-          });
+          monitorRef = m;
+          m.addEventListener('downloadprogress', progressHandler);
         }
       });
 
@@ -151,6 +157,10 @@ export async function ensureModelReady(onStatusChange = null) {
       onStatusChange?.({ status: 'error', message: createErr.message || 'Download failed' });
       return false;
     } finally {
+      // Clean up event listener to prevent memory leak
+      if (monitorRef && progressHandler) {
+        monitorRef.removeEventListener('downloadprogress', progressHandler);
+      }
       // Clean up the session we created just for downloading
       if (session) {
         session.destroy();
