@@ -158,9 +158,23 @@ async function loadDevices() {
       connectedDevices.set(device.deviceId, { deviceId: device.deviceId, label });
     });
 
-    // Load saved priority list
-    const result = await chrome.storage.local.get(['audioDevicePriority']);
+    // Load saved priority list and migrate legacy setting
+    const result = await chrome.storage.local.get(['audioDevicePriority', 'selectedMicrophone']);
     devicePriority = result.audioDevicePriority || [];
+
+    // Migrate legacy selectedMicrophone setting to priority list
+    if (result.selectedMicrophone && devicePriority.length === 0) {
+      const legacyDevice = connectedDevices.get(result.selectedMicrophone);
+      if (legacyDevice) {
+        devicePriority.push({
+          deviceId: result.selectedMicrophone,
+          label: legacyDevice.label,
+          lastSeen: Date.now()
+        });
+      }
+      // Remove legacy setting after migration
+      await chrome.storage.local.remove('selectedMicrophone');
+    }
 
     // Add any new devices to the priority list (at the end)
     const now = Date.now();
@@ -203,6 +217,10 @@ function renderDevicePriorityList() {
     return;
   }
 
+  // Set ARIA attributes on container
+  devicePriorityList.setAttribute('role', 'listbox');
+  devicePriorityList.setAttribute('aria-label', 'Audio device priority list');
+
   // Count connected devices
   const connectedCount = devicePriority.filter(d => connectedDevices.has(d.deviceId)).length;
   deviceCountEl.textContent = `${connectedCount} of ${devicePriority.length} connected`;
@@ -214,10 +232,16 @@ function renderDevicePriorityList() {
     item.dataset.deviceId = device.deviceId;
     item.draggable = true;
 
+    // ARIA attributes for accessibility
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-grabbed', 'false');
+    item.setAttribute('aria-label', `${device.label}, priority ${index + 1}, ${isConnected ? 'connected' : 'not connected'}`);
+
     const dragHandle = document.createElement('span');
     dragHandle.className = 'drag-handle';
     dragHandle.textContent = '⋮⋮';
     dragHandle.title = 'Drag to reorder';
+    dragHandle.setAttribute('aria-hidden', 'true');
 
     const info = document.createElement('div');
     info.className = 'device-info';
@@ -235,11 +259,14 @@ function renderDevicePriorityList() {
 
     const actions = document.createElement('div');
     actions.className = 'device-actions';
+    actions.setAttribute('role', 'group');
+    actions.setAttribute('aria-label', `Actions for ${device.label}`);
 
     const upBtn = document.createElement('button');
     upBtn.className = 'icon-btn';
     upBtn.textContent = '▲';
     upBtn.title = 'Move up';
+    upBtn.setAttribute('aria-label', `Move ${device.label} up in priority`);
     upBtn.disabled = index === 0;
     upBtn.addEventListener('click', () => moveDevice(index, -1));
 
@@ -247,6 +274,7 @@ function renderDevicePriorityList() {
     downBtn.className = 'icon-btn';
     downBtn.textContent = '▼';
     downBtn.title = 'Move down';
+    downBtn.setAttribute('aria-label', `Move ${device.label} down in priority`);
     downBtn.disabled = index === devicePriority.length - 1;
     downBtn.addEventListener('click', () => moveDevice(index, 1));
 
@@ -254,6 +282,7 @@ function renderDevicePriorityList() {
     removeBtn.className = 'icon-btn remove';
     removeBtn.textContent = '×';
     removeBtn.title = 'Remove from list';
+    removeBtn.setAttribute('aria-label', `Remove ${device.label} from priority list`);
     removeBtn.addEventListener('click', () => removeDevice(index));
 
     actions.appendChild(upBtn);
@@ -279,6 +308,7 @@ let draggedItem = null;
 function handleDragStart(e) {
   draggedItem = e.target.closest('.device-priority-item');
   draggedItem.classList.add('dragging');
+  draggedItem.setAttribute('aria-grabbed', 'true');
   e.dataTransfer.effectAllowed = 'move';
 }
 
@@ -300,7 +330,7 @@ function handleDragOver(e) {
   }
 }
 
-function handleDrop(e) {
+async function handleDrop(e) {
   e.preventDefault();
   const dropTarget = e.target.closest('.device-priority-item');
   if (!dropTarget || dropTarget === draggedItem) return;
@@ -311,30 +341,35 @@ function handleDrop(e) {
   const draggedIndex = devicePriority.findIndex(d => d.deviceId === draggedId);
   const targetIndex = devicePriority.findIndex(d => d.deviceId === targetId);
 
-  if (draggedIndex === -1 || targetIndex === -1) return;
+  if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) return;
 
-  // Remove dragged item
-  const [removed] = devicePriority.splice(draggedIndex, 1);
-
-  // Determine insert position based on drop position
+  // Determine if dropping in upper or lower half of target
   const rect = dropTarget.getBoundingClientRect();
   const midpoint = rect.top + rect.height / 2;
-  let insertIndex = targetIndex;
-  if (e.clientY > midpoint) {
-    insertIndex = draggedIndex < targetIndex ? targetIndex : targetIndex + 1;
-  } else {
-    insertIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  const dropInLowerHalf = e.clientY > midpoint;
+
+  // Remove the dragged item first
+  const [removed] = devicePriority.splice(draggedIndex, 1);
+
+  // Calculate insert position in the modified array
+  // After removal, indices >= draggedIndex shift down by 1
+  let adjustedTargetIndex = targetIndex;
+  if (draggedIndex < targetIndex) {
+    adjustedTargetIndex = targetIndex - 1;
   }
 
-  // Insert at new position
+  // Insert before or after the target based on drop position
+  const insertIndex = dropInLowerHalf ? adjustedTargetIndex + 1 : adjustedTargetIndex;
+
   devicePriority.splice(insertIndex, 0, removed);
 
-  saveDevicePriority();
+  await saveDevicePriority();
 }
 
 function handleDragEnd() {
   if (draggedItem) {
     draggedItem.classList.remove('dragging');
+    draggedItem.setAttribute('aria-grabbed', 'false');
   }
   draggedItem = null;
 

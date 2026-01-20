@@ -43,10 +43,21 @@ async function loadSettings() {
   try {
     const result = await chrome.storage.local.get([
       'audioDevicePriority',
+      'selectedMicrophone', // Legacy setting for migration
       'soundFeedbackEnabled',
       'audioVolume'
     ]);
     settings.audioDevicePriority = result.audioDevicePriority || [];
+
+    // Migrate legacy selectedMicrophone setting if priority list is empty
+    if (result.selectedMicrophone && settings.audioDevicePriority.length === 0) {
+      settings.audioDevicePriority = [{
+        deviceId: result.selectedMicrophone,
+        label: 'Migrated Device',
+        lastSeen: Date.now()
+      }];
+    }
+
     settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
     settings.audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
   } catch (err) {
