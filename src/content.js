@@ -9,9 +9,8 @@
   const PERMISSION_ERRORS = ['not-allowed', 'permission-denied', 'permission-dismissed'];
   const FAILED_ORIGINS_KEY = 'utterFailedOrigins';
 
-  // Track if we're using sidepanel fallback
-  let usingSidepanelFallback = false;
-  let sidepanelSessionId = null;
+  // Track if we're using sidepanel fallback (stored on window for persistence across IIFE invocations)
+  // Local aliases that sync with window properties
   let iframeStartupTimer = null;
 
   /**
@@ -115,7 +114,8 @@
   if (!window.__utterSidepanelListener) {
     window.__utterSidepanelListener = (message) => {
       if (message?.source !== 'utter-sidepanel') return;
-      if (message.sessionId !== sidepanelSessionId) return;
+      // Check if we have an active sidepanel session matching this message
+      if (!window.__utterActive || message.sessionId !== window.__utterSidepanelSessionId) return;
       handleRecognitionMessage(message);
     };
     chrome.runtime.onMessage.addListener(window.__utterSidepanelListener);
@@ -143,7 +143,7 @@
           iframeStartupTimer = null;
         }
         // Show indicator for sidepanel mode (recording happens in sidepanel)
-        if (usingSidepanelFallback) {
+        if (window.__utterUsingSidepanelFallback) {
           showIndicator('Listening... (via sidepanel)');
         } else {
           removeIndicator();
@@ -157,7 +157,7 @@
           window.__utterSessionText += message.finalTranscript;
         }
         // Update interim display for sidepanel mode
-        if (usingSidepanelFallback && message.interimTranscript) {
+        if (window.__utterUsingSidepanelFallback && message.interimTranscript) {
           showIndicator(`Listening: ${message.interimTranscript.substring(0, 30)}...`);
         }
         break;
@@ -165,7 +165,7 @@
       case 'recognition-error':
         if (!message.recoverable) {
           // Check if this is a permission error that we should fallback for
-          if (!usingSidepanelFallback && PERMISSION_ERRORS.includes(message.error)) {
+          if (!window.__utterUsingSidepanelFallback && PERMISSION_ERRORS.includes(message.error)) {
             console.log('Utter Content: Permission error in iframe, trying sidepanel fallback');
             // Remember this origin fails so we skip iframe next time
             markOriginAsFailed();
@@ -241,7 +241,7 @@
       // Set up startup timeout - if we don't get recognition-started within timeout,
       // assume iframe failed (e.g., Permissions-Policy blocking microphone)
       iframeStartupTimer = setTimeout(() => {
-        if (!usingSidepanelFallback && window.__utterActive) {
+        if (!window.__utterUsingSidepanelFallback && window.__utterActive) {
           console.log('Utter: Iframe startup timeout, trying sidepanel fallback');
           removeRecognitionFrame();
           startSidepanelRecognition();
@@ -260,9 +260,9 @@
    * @param {boolean} [knownFailure=false] - True if we already knew this origin would fail
    */
   async function startSidepanelRecognition(knownFailure = false) {
-    if (usingSidepanelFallback) return; // Already using fallback
+    if (window.__utterUsingSidepanelFallback) return; // Already using fallback
 
-    usingSidepanelFallback = true;
+    window.__utterUsingSidepanelFallback = true;
     // Show a brief message explaining we're using the sidepanel
     const message = knownFailure
       ? 'Using sidepanel (page blocks microphone)'
@@ -270,17 +270,17 @@
     showIndicator(message);
 
     try {
-      sidepanelSessionId = Date.now().toString();
+      window.__utterSidepanelSessionId = Date.now().toString();
       const response = await chrome.runtime.sendMessage({
         type: 'start-sidepanel-recognition',
-        sessionId: sidepanelSessionId
+        sessionId: window.__utterSidepanelSessionId
       });
 
       if (!response?.success) {
         throw new Error(response?.error || 'Failed to start sidepanel recognition');
       }
 
-      console.log('Utter: Sidepanel recognition started, session:', sidepanelSessionId);
+      console.log('Utter: Sidepanel recognition started, session:', window.__utterSidepanelSessionId);
     } catch (err) {
       console.error('Utter: Failed to start sidepanel recognition:', err);
       showIndicator(getErrorMessage(err.message || 'Failed to start recognition'), true);
@@ -307,11 +307,11 @@
       iframeStartupTimer = null;
     }
 
-    if (usingSidepanelFallback && sidepanelSessionId) {
+    if (window.__utterUsingSidepanelFallback && window.__utterSidepanelSessionId) {
       // Stop sidepanel recognition
       chrome.runtime.sendMessage({
         type: 'stop-sidepanel-recognition',
-        sessionId: sidepanelSessionId
+        sessionId: window.__utterSidepanelSessionId
       }).catch(() => {});
     } else if (window.__utterRecognitionFrame?.contentWindow) {
       // Send stop message to iframe
@@ -447,8 +447,8 @@
     window.__utterActive = false;
     window.__utterTargetElement = null;
     window.__utterSessionText = '';
-    usingSidepanelFallback = false;
-    sidepanelSessionId = null;
+    window.__utterUsingSidepanelFallback = false;
+    window.__utterSidepanelSessionId = null;
     if (iframeStartupTimer) {
       clearTimeout(iframeStartupTimer);
       iframeStartupTimer = null;
