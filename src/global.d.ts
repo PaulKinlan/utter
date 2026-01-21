@@ -10,6 +10,8 @@ interface Window {
   __utterMessageListener?: (event: MessageEvent) => void;
   __utterSidepanelListener?: (message: any) => void;
   __utterRecognitionFrame?: HTMLIFrameElement | null;
+  __utterUsingSidepanelFallback?: boolean;
+  __utterSidepanelSessionId?: string | null;
   __utterLastInsertionInfo?: {
     element: Element;
     startPos?: number;
