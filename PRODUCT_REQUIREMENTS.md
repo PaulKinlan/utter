@@ -687,15 +687,59 @@ function stopRecognition() {
 }
 ```
 
+#### Offscreen Document Fallback (v2.2.0)
+
+While the iframe approach works on most pages, some websites use strict Content Security Policy (CSP) or Permissions-Policy headers that block microphone access even for extension iframes. For these cases, Utter uses an **offscreen document fallback**:
+
+**How It Works:**
+1. Content script attempts to create the recognition iframe (primary method)
+2. If the iframe fails to start recognition within 3 seconds, or returns a permission error:
+   - The iframe is removed
+   - An offscreen document is created via `chrome.offscreen.createDocument()`
+   - Speech recognition runs in the offscreen document's extension context
+3. Results are routed: Offscreen → Background Script → Content Script
+4. The offscreen document is closed when recognition ends
+
+**Message Flow with Offscreen Fallback:**
+```
+Content Script                    Background Script               Offscreen Document
+     │                                   │                              │
+     │  start-offscreen-recognition      │                              │
+     │──────────────────────────────────>│  createDocument()            │
+     │                                   │────────────────────────────->│
+     │                                   │  start recognition           │
+     │                                   │────────────────────────────->│
+     │                                   │                              │
+     │                                   │  recognition-result          │
+     │  recognition-result               │<────────────────────────────│
+     │<──────────────────────────────────│                              │
+     │                                   │                              │
+     │  stop-offscreen-recognition       │  stop                        │
+     │──────────────────────────────────>│────────────────────────────->│
+     │                                   │  closeDocument()             │
+     │                                   │────────────────────────────->│
+```
+
+**Files Involved:**
+- `offscreen/offscreen.html` - Minimal HTML document
+- `offscreen/offscreen.js` - Speech recognition logic (mirrors recognition-frame.js)
+- `background.js` - Handles offscreen document lifecycle and message routing
+- `content.js` / `ptt-listener.js` - Detect failures and trigger fallback
+
+**Why This Works:**
+- Offscreen documents run in the extension's origin, not the page's
+- They have unrestricted access to Web Speech API and microphone
+- CSP/Permissions-Policy headers on the page cannot affect extension context
+
 #### Why Not Other Approaches?
 
 | Approach | Problem |
 |----------|---------|
-| Offscreen Document | Cannot access Web Speech API (headless context) |
+| Offscreen Document Only | Works but no visual feedback (no DOM for UI) |
 | Background Service Worker | No DOM, no Web Speech API |
 | Side Panel | Requires panel to be open; clunky UX |
 | Content Script Directly | Page's CSP may block microphone; conflicts with page scripts |
-| **Iframe (current)** | ✅ Works everywhere, isolated, lightweight |
+| **Iframe + Offscreen Fallback (current)** | ✅ Best of both: visual feedback when possible, universal compatibility |
 
 #### Web Accessible Resources
 

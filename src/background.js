@@ -4,6 +4,54 @@ import { refineWithPreset, refineWithCustomPrompt, checkAvailability, PRESET_PRO
 
 console.log('Utter service worker loaded');
 
+// Offscreen document management
+const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
+let creatingOffscreen = null;
+/** @type {Map<string, {tabId: number, frameId?: number}>} */
+const activeSessions = new Map();
+
+/**
+ * Create the offscreen document if it doesn't exist
+ */
+async function setupOffscreenDocument() {
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+  });
+
+  if (existingContexts.length > 0) {
+    return;
+  }
+
+  if (creatingOffscreen) {
+    await creatingOffscreen;
+    return;
+  }
+
+  creatingOffscreen = chrome.offscreen.createDocument({
+    url: OFFSCREEN_DOCUMENT_PATH,
+    reasons: ['USER_MEDIA'],
+    justification: 'Speech recognition fallback when page blocks microphone access'
+  });
+
+  await creatingOffscreen;
+  creatingOffscreen = null;
+}
+
+/**
+ * Close the offscreen document
+ */
+async function closeOffscreenDocument() {
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
+  });
+
+  if (existingContexts.length > 0) {
+    await chrome.offscreen.closeDocument();
+  }
+}
+
 // Open side panel when extension icon is clicked
 chrome.action.onClicked.addListener(async (tab) => {
   await chrome.sidePanel.open({ tabId: tab.id });
@@ -39,6 +87,28 @@ chrome.commands.onCommand.addListener(async (command) => {
 // Handle messages from content scripts and sidepanel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Utter Background: Received message:', message, 'from:', sender);
+
+  // Handle offscreen recognition start request from content scripts
+  if (message.type === 'start-offscreen-recognition') {
+    handleStartOffscreenRecognition(message, sender)
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // Handle offscreen recognition stop request from content scripts
+  if (message.type === 'stop-offscreen-recognition') {
+    handleStopOffscreenRecognition(message.sessionId)
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // Handle messages from offscreen document - route to content scripts
+  if (message.source === 'offscreen-recognition') {
+    handleOffscreenMessage(message);
+    return false;
+  }
 
   // Handle settings request from sidepanel
   if (message.type === 'get-settings' && message.target === 'background') {
@@ -110,6 +180,100 @@ async function handleRefineText(message) {
   }
 
   return { refinedText };
+}
+
+/**
+ * Handle start offscreen recognition request
+ */
+async function handleStartOffscreenRecognition(message, sender) {
+  const sessionId = message.sessionId || Date.now().toString();
+  const tabId = sender.tab?.id;
+
+  if (!tabId) {
+    throw new Error('No tab ID found');
+  }
+
+  // Store session info for routing messages back
+  activeSessions.set(sessionId, { tabId, frameId: sender.frameId });
+
+  // Create offscreen document if needed
+  await setupOffscreenDocument();
+
+  // Send start message to offscreen document
+  const response = await chrome.runtime.sendMessage({
+    target: 'offscreen-recognition',
+    type: 'start',
+    sessionId
+  });
+
+  if (!response?.success) {
+    activeSessions.delete(sessionId);
+    throw new Error(response?.error || 'Failed to start recognition');
+  }
+
+  return { success: true, sessionId };
+}
+
+/**
+ * Handle stop offscreen recognition request
+ */
+async function handleStopOffscreenRecognition(sessionId) {
+  if (!sessionId) {
+    throw new Error('No session ID provided');
+  }
+
+  try {
+    await chrome.runtime.sendMessage({
+      target: 'offscreen-recognition',
+      type: 'stop',
+      sessionId
+    });
+  } catch {
+    // Offscreen document may already be closed
+  }
+
+  activeSessions.delete(sessionId);
+
+  // Close offscreen document if no more active sessions
+  if (activeSessions.size === 0) {
+    await closeOffscreenDocument().catch(() => {});
+  }
+}
+
+/**
+ * Handle messages from offscreen document and route to content scripts
+ */
+function handleOffscreenMessage(message) {
+  const { sessionId, type, ...data } = message;
+
+  if (!sessionId) {
+    console.warn('Utter Background: Offscreen message without sessionId');
+    return;
+  }
+
+  const session = activeSessions.get(sessionId);
+  if (!session) {
+    console.warn('Utter Background: No active session for:', sessionId);
+    return;
+  }
+
+  // Route message to content script
+  chrome.tabs.sendMessage(session.tabId, {
+    source: 'utter-offscreen',
+    type,
+    sessionId,
+    ...data
+  }).catch(err => {
+    console.error('Utter Background: Failed to send to content script:', err);
+  });
+
+  // Clean up session on recognition ended
+  if (type === 'recognition-ended') {
+    activeSessions.delete(sessionId);
+    if (activeSessions.size === 0) {
+      closeOffscreenDocument().catch(() => {});
+    }
+  }
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {

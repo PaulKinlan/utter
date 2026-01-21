@@ -8,6 +8,7 @@ interface Window {
   __utterTargetElement?: Element | null;
   __utterSessionText?: string;
   __utterMessageListener?: (event: MessageEvent) => void;
+  __utterOffscreenListener?: (message: any) => void;
   __utterRecognitionFrame?: HTMLIFrameElement | null;
   __utterLastInsertionInfo?: {
     element: Element;

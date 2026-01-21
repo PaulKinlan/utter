@@ -13,6 +13,7 @@ export default [
         navigator: 'readonly',
         Event: 'readonly',
         setTimeout: 'readonly',
+        clearTimeout: 'readonly',
         URL: 'readonly',
         Date: 'readonly',
         NodeFilter: 'readonly',

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { crx } from '@crxjs/vite-plugin';
+import { resolve } from 'path';
 import manifest from './src/manifest.json' with { type: 'json' };
 
 export default defineConfig({
@@ -14,7 +15,9 @@ export default defineConfig({
       polyfill: false,
     },
     rollupOptions: {
-      input: {},
+      input: {
+        'offscreen/offscreen': resolve(__dirname, 'src/offscreen/offscreen.html'),
+      },
     },
   },
 });

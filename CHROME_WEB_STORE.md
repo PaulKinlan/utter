@@ -116,6 +116,14 @@ All data is stored locally using `chrome.storage.local` and is never transmitted
 
 **Justification:** Required to display the voice input history panel. The side panel shows users their past transcriptions with timestamps and source page URLs, allowing them to review or delete entries. This feature is optional and the extension works fully without opening the side panel.
 
+### Permission: `offscreen`
+
+**Justification:** Required as a fallback mechanism for speech recognition on pages that block microphone access. Some websites use Content Security Policy (CSP) or Permissions-Policy headers that prevent the extension's iframe from accessing the microphone. The offscreen document provides unrestricted microphone access in the extension's own context, ensuring voice-to-text works on all websites. The offscreen document:
+1. Is only created when the primary iframe-based recognition fails
+2. Runs speech recognition using the same Web Speech API
+3. Is closed immediately after use to conserve resources
+4. Does not access or modify any page content
+
 ### Host Permission: `<all_urls>` (Content Scripts)
 
 **Justification:** The push-to-talk feature requires a content script to run on all pages to listen for the user's custom key combination. This script:
@@ -196,7 +204,13 @@ Required screenshots to create:
 
 ## Version History
 
-### v2.1.0 (Current)
+### v2.2.0 (Current)
+- **NEW:** Automatic fallback for restricted pages — Voice input now works on sites with strict Content Security Policy (CSP) or Permissions-Policy headers that block microphone access
+- **IMPROVED:** Better error messages — Clear, user-friendly feedback when issues occur (e.g., "Microphone access blocked by this page")
+- **IMPROVED:** Fallback mode indicator — Shows "(fallback mode)" when using the offscreen fallback so users know the extension adapted
+- Under the hood: Added offscreen document as fallback when iframe-based recognition fails
+
+### v2.1.0
 - **NEW:** Audio device priority system — set a priority order for microphones
 - **NEW:** Automatic device selection — uses the highest-priority connected device
 - **NEW:** Seamless fallback — automatically switches to next priority device when preferred device is unavailable
