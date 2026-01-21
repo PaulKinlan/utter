@@ -118,6 +118,21 @@ Run `npm run generate-icons` to create placeholder icons if missing.
 - Prefer async/await over callbacks for Chrome APIs
 - All Chrome API calls should handle errors appropriately
 
+### Code Quality Requirements (MANDATORY)
+
+**Linting must pass before committing any changes.** This is enforced by CI on GitHub.
+
+Before committing:
+1. Run `npm run lint` to check for lint errors
+2. Fix all errors and warnings before committing
+3. Do not commit code with lint failures - the CI build will fail
+
+Common lint issues to avoid:
+- Unused variables or imports (remove them or prefix with `_` if intentionally unused)
+- Unused function parameters in callbacks (use `_` prefix, e.g., `(_unused) => {}`)
+- Undefined variables
+- Missing semicolons (if configured)
+
 ### Speech Recognition Architecture (DO NOT REGRESS)
 
 The extension uses an **iframe-based architecture** for speech recognition. This design is critical and must not be changed without understanding why it exists.

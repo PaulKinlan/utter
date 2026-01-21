@@ -270,7 +270,7 @@ async function startRecognition() {
     if (recognition) {
       try {
         recognition.start();
-      } catch (err) {
+      } catch {
         sendToParent({ type: 'recognition-ended' });
         cleanup();
       }

@@ -20,8 +20,6 @@
   let activeRefinementPromptId = null; // Track which refinement prompt triggered the recording
   let contextInvalidated = false;
   let recognitionFrame = null;
-  let lastTranscriptionEntry = null; // Track last transcription for refinement
-  let lastInsertionInfo = null; // Track where text was inserted for replacement
 
   // Check if extension context is still valid
   function isContextValid() {
@@ -224,8 +222,6 @@
 
       await chrome.storage.local.set({ utterHistory: history });
       console.log('Utter PTT: Saved to history with refinement');
-
-      lastTranscriptionEntry = entry;
     } catch (err) {
       console.error('Utter PTT: Error saving to history:', err);
     }
@@ -489,13 +485,6 @@
           }
         }
         console.log('Utter PTT: Inserted into contenteditable');
-
-        // Track insertion for contenteditable (best effort)
-        lastInsertionInfo = {
-          element: element,
-          text: text,
-          isContentEditable: true
-        };
       } else {
         // For input/textarea elements
         const start = element.selectionStart ?? element.value?.length ?? 0;
@@ -509,15 +498,6 @@
         element.dispatchEvent(new Event('input', { bubbles: true }));
         element.dispatchEvent(new Event('change', { bubbles: true }));
         console.log('Utter PTT: Inserted into input/textarea');
-
-        // Track insertion info for replacement during refinement
-        lastInsertionInfo = {
-          element: element,
-          startPos: start,
-          length: text.length,
-          text: text,
-          isContentEditable: false
-        };
       }
     } catch (err) {
       console.error('Utter PTT: Error inserting text:', err);
@@ -569,123 +549,6 @@
     activeRefinementPromptId = null;
     removeIndicator();
     removeRecognitionFrame();
-  }
-
-  function replaceLastInsertion(refinedText) {
-    // Check both local tracking (from PTT mode) and global tracking (from toggle mode)
-    const insertionInfo = lastInsertionInfo || window.__utterLastInsertionInfo;
-
-    if (!insertionInfo) {
-      console.warn('Utter PTT: No insertion info, using regular insert');
-      return false;
-    }
-
-    const { element, startPos, length, text, isContentEditable } = insertionInfo;
-
-    // Verify element is still valid
-    if (!element || !document.body.contains(element)) {
-      console.warn('Utter PTT: Last insertion element no longer valid');
-      return false;
-    }
-
-    try {
-      element.focus();
-
-      if (isContentEditable) {
-        // For contenteditable, try to find and replace the last inserted text
-        const currentText = element.textContent || '';
-        const lastIndex = currentText.lastIndexOf(text);
-
-        if (lastIndex !== -1) {
-          // Select the text to replace
-          const selection = window.getSelection();
-          const range = document.createRange();
-
-          // Find the text node and position
-          let charCount = 0;
-          let startNode = null;
-          let startOffset = 0;
-          let endNode = null;
-          let endOffset = 0;
-
-          const walker = document.createTreeWalker(
-            element,
-            NodeFilter.SHOW_TEXT,
-            null,
-            false
-          );
-
-          while (walker.nextNode()) {
-            const node = walker.currentNode;
-            const nodeLength = node.textContent.length;
-
-            if (charCount + nodeLength >= lastIndex && !startNode) {
-              startNode = node;
-              startOffset = lastIndex - charCount;
-            }
-
-            if (charCount + nodeLength >= lastIndex + text.length) {
-              endNode = node;
-              endOffset = (lastIndex + text.length) - charCount;
-              break;
-            }
-
-            charCount += nodeLength;
-          }
-
-          if (startNode && endNode) {
-            range.setStart(startNode, startOffset);
-            range.setEnd(endNode, endOffset);
-            range.deleteContents();
-            range.insertNode(document.createTextNode(refinedText));
-            range.collapse(false);
-            selection.removeAllRanges();
-            selection.addRange(range);
-
-            // Update tracking (both local and global)
-            if (lastInsertionInfo) lastInsertionInfo.text = refinedText;
-            if (window.__utterLastInsertionInfo) window.__utterLastInsertionInfo.text = refinedText;
-            return true;
-          }
-        }
-
-        // Fallback to regular insert
-        return false;
-      } else {
-        // For input/textarea, we can precisely replace
-        const value = element.value || '';
-
-        // Verify the text is still there at the expected position
-        const expectedEnd = startPos + length;
-        if (value.substring(startPos, expectedEnd) === text) {
-          // Replace the exact range
-          element.value = value.substring(0, startPos) + refinedText + value.substring(expectedEnd);
-          element.selectionStart = element.selectionEnd = startPos + refinedText.length;
-
-          element.dispatchEvent(new Event('input', { bubbles: true }));
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-
-          // Update tracking (both local and global)
-          if (lastInsertionInfo) {
-            lastInsertionInfo.length = refinedText.length;
-            lastInsertionInfo.text = refinedText;
-          }
-          if (window.__utterLastInsertionInfo) {
-            window.__utterLastInsertionInfo.length = refinedText.length;
-            window.__utterLastInsertionInfo.text = refinedText;
-          }
-
-          console.log('Utter PTT: Replaced text at position', startPos);
-          return true;
-        } else {
-          console.warn('Utter PTT: Text at tracked position does not match, cannot replace');
-          return false;
-        }
-      }
-    } catch (err) {
-      console.error('Utter PTT: Error replacing text:', err);
-      return false;
-    }
   }
 
   async function startRefinement() {
@@ -755,9 +618,6 @@
 
       await chrome.storage.local.set({ utterHistory: trimmedHistory });
       console.log('Utter PTT: Saved to history with audio:', !!audioDataUrl);
-
-      // Save this as the last transcription for potential refinement
-      lastTranscriptionEntry = entry;
     } catch (err) {
       if (err.message?.includes('Extension context invalidated')) {
         contextInvalidated = true;

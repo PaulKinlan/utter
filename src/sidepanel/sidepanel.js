@@ -7,7 +7,6 @@ const settingsBtn = document.getElementById('settings');
 const recordingSection = document.getElementById('recording-section');
 const interimTextEl = document.getElementById('interim-text');
 const stopRecordingBtn = document.getElementById('stop-recording');
-const shortcutsContainer = document.getElementById('shortcuts-container');
 
 let history = [];
 
