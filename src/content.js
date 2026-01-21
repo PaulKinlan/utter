@@ -29,13 +29,20 @@
   }
 
   // Store reference to the target element
-  const targetElement = document.activeElement;
+  /** @type {HTMLElement | null} */
+  const targetElement = /** @type {HTMLElement | null} */ (document.activeElement);
 
-  console.log('Utter: Target element:', targetElement.tagName, targetElement);
+  console.log('Utter: Target element:', targetElement?.tagName, targetElement);
+
+  if (!targetElement) {
+    showIndicator('Focus on a text field first', true);
+    return;
+  }
 
   // Check if the active element is a text input
+  const inputElement = /** @type {HTMLInputElement} */ (targetElement);
   const isTextInput =
-    (targetElement.tagName === 'INPUT' && isTextInputType(targetElement.type)) ||
+    (targetElement.tagName === 'INPUT' && isTextInputType(inputElement.type)) ||
     targetElement.tagName === 'TEXTAREA' ||
     targetElement.isContentEditable;
 
@@ -279,12 +286,19 @@
     removeRecognitionFrame();
   }
 
+  /**
+   * Save transcription to history
+   * @param {string} text - The transcribed text
+   * @param {string | null} [audioDataUrl=null] - Optional audio data URL
+   */
   async function saveToHistory(text, audioDataUrl = null) {
     if (!isContextValid()) return;
     try {
       const result = await chrome.storage.local.get(['utterHistory']);
-      const history = result.utterHistory || [];
+      /** @type {Array<{id: string, text: string, timestamp: number, url: string, audioDataUrl?: string}>} */
+      const history = Array.isArray(result.utterHistory) ? result.utterHistory : [];
 
+      /** @type {{id: string, text: string, timestamp: number, url: string, audioDataUrl?: string}} */
       const entry = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         text: text,

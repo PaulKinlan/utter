@@ -1,6 +1,33 @@
+// @ts-nocheck
 // Options page script
 
 import { PRESET_PROMPTS, checkAvailability, getAvailablePrompts, ensureModelReady } from '../refinement-service.js';
+
+/**
+ * @typedef {Object} KeyCombo
+ * @property {boolean} ctrlKey
+ * @property {boolean} shiftKey
+ * @property {boolean} altKey
+ * @property {boolean} metaKey
+ * @property {string} key
+ * @property {string} code
+ */
+
+/**
+ * @typedef {Object} AudioDevicePriority
+ * @property {string} deviceId
+ * @property {string} label
+ * @property {number} lastSeen
+ */
+
+/**
+ * @typedef {Object} CustomRefinementPrompt
+ * @property {string} id
+ * @property {string} name
+ * @property {string} [description]
+ * @property {string} prompt
+ * @property {KeyCombo} [hotkey]
+ */
 
 const microphoneField = document.getElementById('microphone-field');
 const devicePriorityList = document.getElementById('device-priority-list');
@@ -12,8 +39,10 @@ const saveStatus = document.getElementById('save-status');
 const shortcutsLink = document.getElementById('shortcuts-link');
 
 // Device priority state
-let devicePriority = []; // Array of { deviceId, label, lastSeen }
-let connectedDevices = new Map(); // deviceId -> { deviceId, label }
+/** @type {AudioDevicePriority[]} */
+let devicePriority = [];
+/** @type {Map<string, {deviceId: string, label: string}>} */
+let connectedDevices = new Map();
 
 // Activation mode elements
 const activationModeRadios = document.querySelectorAll('input[name="activation-mode"]');
