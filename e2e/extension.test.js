@@ -1,23 +1,18 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import puppeteer from 'puppeteer-core';
-import { findChrome, getExtensionPath, isCI } from './setup.js';
+import { findChrome, getExtensionPath, waitForExtensionId } from './setup.js';
+
+const chromePath = findChrome();
 
 let browser;
-let chromePath;
+let extensionId;
 
-describe('Utter Extension E2E Tests', () => {
+describe.skipIf(!chromePath)('Utter Extension E2E Tests', () => {
   beforeAll(async () => {
-    chromePath = findChrome();
-
-    if (!chromePath) {
-      console.warn('Chrome/Chromium not found. Skipping e2e tests.');
-      return;
-    }
-
     const extensionPath = getExtensionPath();
 
     browser = await puppeteer.launch({
-      headless: false, // Extensions require non-headless mode
+      headless: false,
       executablePath: chromePath,
       args: [
         `--disable-extensions-except=${extensionPath}`,
@@ -25,10 +20,12 @@ describe('Utter Extension E2E Tests', () => {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        // Use new headless mode that supports extensions
         '--headless=new',
       ],
     });
+
+    // Wait for extension to load and get its ID
+    extensionId = await waitForExtensionId(browser);
   }, 30000);
 
   afterAll(async () => {
@@ -37,50 +34,19 @@ describe('Utter Extension E2E Tests', () => {
     }
   });
 
-  it('should skip if Chrome is not available', async () => {
-    if (!chromePath) {
-      console.log('Skipping: Chrome not available');
-      return;
-    }
-    expect(browser).toBeDefined();
-  });
-
   describe('Options Page', () => {
     it('should load the options page', async () => {
-      if (!browser) return;
-
-      // Get extension ID from the loaded extension
-      const targets = await browser.targets();
-      const extensionTarget = targets.find(
-        (target) => target.type() === 'service_worker' && target.url().startsWith('chrome-extension://')
-      );
-
-      if (!extensionTarget) {
-        // Extension may not have service worker active yet, try background page
-        const backgroundTarget = targets.find(
-          (target) => target.url().startsWith('chrome-extension://')
-        );
-        expect(backgroundTarget).toBeDefined();
-        return;
-      }
-
-      const extensionUrl = extensionTarget.url();
-      const extensionId = extensionUrl.split('/')[2];
-
       const page = await browser.newPage();
       await page.goto(`chrome-extension://${extensionId}/options/options.html`, {
         waitUntil: 'domcontentloaded',
       });
 
-      // Check that the options page has loaded correctly
       const title = await page.title();
       expect(title).toBe('Utter Options');
 
-      // Check for key elements on the options page
       const h1Text = await page.$eval('h1', (el) => el.textContent);
       expect(h1Text).toContain('Utter Options');
 
-      // Check that activation mode section exists
       const activationSection = await page.$('section h2');
       expect(activationSection).not.toBeNull();
 
@@ -88,28 +54,14 @@ describe('Utter Extension E2E Tests', () => {
     }, 15000);
 
     it('should have activation mode radio buttons', async () => {
-      if (!browser) return;
-
-      const targets = await browser.targets();
-      const extensionTarget = targets.find(
-        (target) => target.url().startsWith('chrome-extension://')
-      );
-
-      if (!extensionTarget) return;
-
-      const extensionUrl = extensionTarget.url();
-      const extensionId = extensionUrl.split('/')[2];
-
       const page = await browser.newPage();
       await page.goto(`chrome-extension://${extensionId}/options/options.html`, {
         waitUntil: 'domcontentloaded',
       });
 
-      // Check toggle mode radio
       const toggleRadio = await page.$('input[name="activation-mode"][value="toggle"]');
       expect(toggleRadio).not.toBeNull();
 
-      // Check push-to-talk radio
       const pttRadio = await page.$('input[name="activation-mode"][value="push-to-talk"]');
       expect(pttRadio).not.toBeNull();
 
@@ -117,18 +69,6 @@ describe('Utter Extension E2E Tests', () => {
     }, 15000);
 
     it('should have sound feedback checkbox', async () => {
-      if (!browser) return;
-
-      const targets = await browser.targets();
-      const extensionTarget = targets.find(
-        (target) => target.url().startsWith('chrome-extension://')
-      );
-
-      if (!extensionTarget) return;
-
-      const extensionUrl = extensionTarget.url();
-      const extensionId = extensionUrl.split('/')[2];
-
       const page = await browser.newPage();
       await page.goto(`chrome-extension://${extensionId}/options/options.html`, {
         waitUntil: 'domcontentloaded',
@@ -143,32 +83,17 @@ describe('Utter Extension E2E Tests', () => {
 
   describe('Side Panel', () => {
     it('should load the sidepanel page', async () => {
-      if (!browser) return;
-
-      const targets = await browser.targets();
-      const extensionTarget = targets.find(
-        (target) => target.url().startsWith('chrome-extension://')
-      );
-
-      if (!extensionTarget) return;
-
-      const extensionUrl = extensionTarget.url();
-      const extensionId = extensionUrl.split('/')[2];
-
       const page = await browser.newPage();
       await page.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`, {
         waitUntil: 'domcontentloaded',
       });
 
-      // Check that the sidepanel has loaded correctly
       const title = await page.title();
       expect(title).toBe('Utter');
 
-      // Check for header
       const h1Text = await page.$eval('h1', (el) => el.textContent);
       expect(h1Text).toBe('Utter');
 
-      // Check for history list container
       const historyList = await page.$('#history-list');
       expect(historyList).not.toBeNull();
 
@@ -176,24 +101,11 @@ describe('Utter Extension E2E Tests', () => {
     }, 15000);
 
     it('should have empty state when no recordings', async () => {
-      if (!browser) return;
-
-      const targets = await browser.targets();
-      const extensionTarget = targets.find(
-        (target) => target.url().startsWith('chrome-extension://')
-      );
-
-      if (!extensionTarget) return;
-
-      const extensionUrl = extensionTarget.url();
-      const extensionId = extensionUrl.split('/')[2];
-
       const page = await browser.newPage();
       await page.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`, {
         waitUntil: 'domcontentloaded',
       });
 
-      // Check for empty state
       const emptyState = await page.$('#empty-state');
       expect(emptyState).not.toBeNull();
 
@@ -204,18 +116,6 @@ describe('Utter Extension E2E Tests', () => {
     }, 15000);
 
     it('should have settings and clear buttons', async () => {
-      if (!browser) return;
-
-      const targets = await browser.targets();
-      const extensionTarget = targets.find(
-        (target) => target.url().startsWith('chrome-extension://')
-      );
-
-      if (!extensionTarget) return;
-
-      const extensionUrl = extensionTarget.url();
-      const extensionId = extensionUrl.split('/')[2];
-
       const page = await browser.newPage();
       await page.goto(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`, {
         waitUntil: 'domcontentloaded',
@@ -233,25 +133,11 @@ describe('Utter Extension E2E Tests', () => {
 
   describe('Recognition Frame', () => {
     it('should load the recognition frame', async () => {
-      if (!browser) return;
-
-      const targets = await browser.targets();
-      const extensionTarget = targets.find(
-        (target) => target.url().startsWith('chrome-extension://')
-      );
-
-      if (!extensionTarget) return;
-
-      const extensionUrl = extensionTarget.url();
-      const extensionId = extensionUrl.split('/')[2];
-
       const page = await browser.newPage();
       await page.goto(`chrome-extension://${extensionId}/recognition-frame/recognition-frame.html`, {
         waitUntil: 'domcontentloaded',
       });
 
-      // Recognition frame should load without errors
-      // It's a minimal page for speech recognition
       const body = await page.$('body');
       expect(body).not.toBeNull();
 
@@ -260,17 +146,16 @@ describe('Utter Extension E2E Tests', () => {
   });
 
   describe('Background Service Worker', () => {
-    it('should have service worker registered', async () => {
-      if (!browser) return;
-
+    it('should have service worker registered for the extension', async () => {
       const targets = await browser.targets();
       const serviceWorker = targets.find(
-        (target) => target.type() === 'service_worker' && target.url().startsWith('chrome-extension://')
+        (target) =>
+          target.type() === 'service_worker' &&
+          target.url().startsWith(`chrome-extension://${extensionId}/`)
       );
 
-      // Service worker should be registered (may be inactive)
-      // We just verify it exists at some point
-      expect(targets.some((t) => t.url().startsWith('chrome-extension://'))).toBe(true);
+      expect(serviceWorker).toBeDefined();
+      expect(serviceWorker.url()).toContain(extensionId);
     }, 15000);
   });
 });
