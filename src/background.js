@@ -4,6 +4,10 @@ import { refineWithPreset, refineWithCustomPrompt, checkAvailability, PRESET_PRO
 
 console.log('Utter service worker loaded');
 
+// Sidepanel fallback session management
+/** @type {Map<string, {tabId: number, frameId?: number}>} */
+const activeSessions = new Map();
+
 // Open side panel when extension icon is clicked
 chrome.action.onClicked.addListener(async (tab) => {
   await chrome.sidePanel.open({ tabId: tab.id });
@@ -39,6 +43,31 @@ chrome.commands.onCommand.addListener(async (command) => {
 // Handle messages from content scripts and sidepanel
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Utter Background: Received message:', message, 'from:', sender);
+
+  // Handle sidepanel recognition start request from content scripts
+  if (message.type === 'start-sidepanel-recognition') {
+    handleStartSidepanelRecognition(message, sender)
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // Handle sidepanel recognition stop request from content scripts
+  if (message.type === 'stop-sidepanel-recognition') {
+    handleStopSidepanelRecognition(message.sessionId)
+      .then(() => sendResponse({ success: true }))
+      .catch(err => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
+
+  // Handle messages from sidepanel - route to content scripts
+  if (message.type === 'recognition-started' ||
+      message.type === 'recognition-result' ||
+      message.type === 'recognition-error' ||
+      message.type === 'recognition-ended') {
+    handleSidepanelRecognitionMessage(message);
+    return false;
+  }
 
   // Handle settings request from sidepanel
   if (message.type === 'get-settings' && message.target === 'background') {
@@ -110,6 +139,106 @@ async function handleRefineText(message) {
   }
 
   return { refinedText };
+}
+
+/**
+ * Handle start sidepanel recognition request (fallback when iframe fails)
+ */
+async function handleStartSidepanelRecognition(message, sender) {
+  const sessionId = message.sessionId || Date.now().toString();
+  const tabId = sender.tab?.id;
+
+  if (!tabId) {
+    throw new Error('No tab ID found');
+  }
+
+  // Store session info for routing messages back
+  activeSessions.set(sessionId, { tabId, frameId: sender.frameId });
+
+  // Open the sidepanel for the tab
+  try {
+    await chrome.sidePanel.open({ tabId });
+  } catch (err) {
+    console.error('Utter Background: Failed to open sidepanel:', err);
+    activeSessions.delete(sessionId);
+    throw new Error('Failed to open sidepanel');
+  }
+
+  // Give sidepanel a moment to initialize, then send start message
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  // Send start message to sidepanel
+  try {
+    const response = await chrome.runtime.sendMessage({
+      target: 'sidepanel',
+      type: 'start-recognition',
+      sessionId
+    });
+
+    if (!response?.success) {
+      activeSessions.delete(sessionId);
+      throw new Error(response?.error || 'Failed to start recognition in sidepanel');
+    }
+
+    return { success: true, sessionId };
+  } catch {
+    activeSessions.delete(sessionId);
+    throw new Error('Sidepanel not responding');
+  }
+}
+
+/**
+ * Handle stop sidepanel recognition request
+ */
+async function handleStopSidepanelRecognition(sessionId) {
+  if (!sessionId) {
+    throw new Error('No session ID provided');
+  }
+
+  try {
+    await chrome.runtime.sendMessage({
+      target: 'sidepanel',
+      type: 'stop-recognition',
+      sessionId
+    });
+  } catch {
+    // Sidepanel may not be open
+  }
+
+  activeSessions.delete(sessionId);
+}
+
+/**
+ * Handle messages from sidepanel and route to content scripts
+ */
+function handleSidepanelRecognitionMessage(message) {
+  const { sessionId, type, ...data } = message;
+
+  if (!sessionId) {
+    // Not a fallback session, ignore (sidepanel can also record independently)
+    return;
+  }
+
+  const session = activeSessions.get(sessionId);
+  if (!session) {
+    // Not a tracked fallback session
+    return;
+  }
+
+  // Route message to content script
+  chrome.tabs.sendMessage(session.tabId, {
+    source: 'utter-sidepanel',
+    type,
+    sessionId,
+    ...data
+  }).catch(err => {
+    console.error('Utter Background: Failed to send to content script:', err);
+  });
+
+  // Clean up session on recognition ended
+  if (type === 'recognition-ended') {
+    activeSessions.delete(sessionId);
+  }
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {

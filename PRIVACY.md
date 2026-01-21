@@ -65,7 +65,7 @@ Utter requests the following permissions:
 | `activeTab` | Access the current tab to insert transcribed text into text fields |
 | `scripting` | Inject the voice input interface when you activate the hotkey |
 | `storage` | Save your preferences and voice input history locally |
-| `sidePanel` | Display your voice input history in Chrome's side panel |
+| `sidePanel` | Display your voice input history and provide fallback for restricted pages |
 
 The content script runs on all URLs solely to enable push-to-talk functionality. It listens for your configured key combination and does not read or collect any page content.
 

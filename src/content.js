@@ -1,9 +1,17 @@
 // Content script for speech recognition UI and text insertion
 // Uses iframe for speech recognition (like PTT mode)
+// Falls back to sidepanel when iframe fails due to CSP/Permissions-Policy
 
 (async function () {
   const INDICATOR_ID = 'utter-listening-indicator';
   const IFRAME_ID = 'utter-recognition-frame';
+  const IFRAME_STARTUP_TIMEOUT = 3000; // 3 seconds to detect iframe failure
+  const PERMISSION_ERRORS = ['not-allowed', 'permission-denied', 'permission-dismissed'];
+
+  // Track if we're using sidepanel fallback
+  let usingSidepanelFallback = false;
+  let sidepanelSessionId = null;
+  let iframeStartupTimer = null;
 
   // Check if extension context is still valid
   function isContextValid() {
@@ -65,6 +73,16 @@
     window.addEventListener('message', window.__utterMessageListener);
   }
 
+  // Set up listener for sidepanel recognition messages (via background)
+  if (!window.__utterSidepanelListener) {
+    window.__utterSidepanelListener = (message) => {
+      if (message?.source !== 'utter-sidepanel') return;
+      if (message.sessionId !== sidepanelSessionId) return;
+      handleRecognitionMessage(message);
+    };
+    chrome.runtime.onMessage.addListener(window.__utterSidepanelListener);
+  }
+
   // Create the recognition iframe
   createRecognitionFrame();
 
@@ -73,8 +91,17 @@
 
     switch (message.type) {
       case 'recognition-started':
-        // Iframe shows its own "Listening..." status
-        removeIndicator();
+        // Clear startup timer - iframe/sidepanel is working
+        if (iframeStartupTimer) {
+          clearTimeout(iframeStartupTimer);
+          iframeStartupTimer = null;
+        }
+        // Show indicator for sidepanel mode (recording happens in sidepanel)
+        if (usingSidepanelFallback) {
+          showIndicator('Listening... (via sidepanel)');
+        } else {
+          removeIndicator();
+        }
         break;
 
       case 'recognition-result':
@@ -83,12 +110,22 @@
           // Accumulate text for this session
           window.__utterSessionText += message.finalTranscript;
         }
-        // Iframe shows interim transcription
+        // Update interim display for sidepanel mode
+        if (usingSidepanelFallback && message.interimTranscript) {
+          showIndicator(`Listening: ${message.interimTranscript.substring(0, 30)}...`);
+        }
         break;
 
       case 'recognition-error':
         if (!message.recoverable) {
-          showIndicator(`Error: ${message.error}`, true);
+          // Check if this is a permission error that we should fallback for
+          if (!usingSidepanelFallback && PERMISSION_ERRORS.includes(message.error)) {
+            console.log('Utter Content: Permission error in iframe, trying sidepanel fallback');
+            removeRecognitionFrame();
+            startSidepanelRecognition();
+            return;
+          }
+          showIndicator(getErrorMessage(message.error), true);
           cleanup();
         }
         break;
@@ -101,6 +138,23 @@
         cleanup();
         break;
     }
+  }
+
+  /**
+   * Map error codes to user-friendly messages
+   */
+  function getErrorMessage(errorCode) {
+    const errorMessages = {
+      'not-allowed': 'Microphone access blocked by this page',
+      'permission-denied': 'Microphone permission denied',
+      'permission-dismissed': 'Microphone permission request dismissed',
+      'no-speech': 'No speech detected',
+      'audio-capture': 'No microphone available',
+      'network': 'Network error - check your connection',
+      'aborted': 'Recognition was aborted',
+      'service-not-allowed': 'Speech service not available'
+    };
+    return errorMessages[errorCode] || `Error: ${errorCode}`;
   }
 
   function createRecognitionFrame() {
@@ -126,11 +180,57 @@
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
       `;
 
+      // Handle iframe load errors (CSP blocking the iframe src)
+      window.__utterRecognitionFrame.onerror = () => {
+        console.log('Utter: Iframe load error, trying sidepanel fallback');
+        removeRecognitionFrame();
+        startSidepanelRecognition();
+      };
+
       document.body.appendChild(window.__utterRecognitionFrame);
       console.log('Utter: Recognition frame created');
+
+      // Set up startup timeout - if we don't get recognition-started within timeout,
+      // assume iframe failed (e.g., Permissions-Policy blocking microphone)
+      iframeStartupTimer = setTimeout(() => {
+        if (!usingSidepanelFallback && window.__utterActive) {
+          console.log('Utter: Iframe startup timeout, trying sidepanel fallback');
+          removeRecognitionFrame();
+          startSidepanelRecognition();
+        }
+      }, IFRAME_STARTUP_TIMEOUT);
+
     } catch (err) {
       console.error('Utter: Failed to create recognition frame:', err);
-      showIndicator('Failed to start recognition', true);
+      // Try sidepanel fallback
+      startSidepanelRecognition();
+    }
+  }
+
+  /**
+   * Start recognition using sidepanel (fallback mode)
+   */
+  async function startSidepanelRecognition() {
+    if (usingSidepanelFallback) return; // Already using fallback
+
+    usingSidepanelFallback = true;
+    showIndicator('Opening sidepanel...');
+
+    try {
+      sidepanelSessionId = Date.now().toString();
+      const response = await chrome.runtime.sendMessage({
+        type: 'start-sidepanel-recognition',
+        sessionId: sidepanelSessionId
+      });
+
+      if (!response?.success) {
+        throw new Error(response?.error || 'Failed to start sidepanel recognition');
+      }
+
+      console.log('Utter: Sidepanel recognition started, session:', sidepanelSessionId);
+    } catch (err) {
+      console.error('Utter: Failed to start sidepanel recognition:', err);
+      showIndicator(getErrorMessage(err.message || 'Failed to start recognition'), true);
       cleanup();
     }
   }
@@ -148,15 +248,27 @@
   }
 
   function stopRecognition() {
-    // Send stop message to iframe
-    if (window.__utterRecognitionFrame?.contentWindow) {
+    // Clear startup timer if pending
+    if (iframeStartupTimer) {
+      clearTimeout(iframeStartupTimer);
+      iframeStartupTimer = null;
+    }
+
+    if (usingSidepanelFallback && sidepanelSessionId) {
+      // Stop sidepanel recognition
+      chrome.runtime.sendMessage({
+        type: 'stop-sidepanel-recognition',
+        sessionId: sidepanelSessionId
+      }).catch(() => {});
+    } else if (window.__utterRecognitionFrame?.contentWindow) {
+      // Send stop message to iframe
       window.__utterRecognitionFrame.contentWindow.postMessage({
         target: 'utter-recognition-frame',
         type: 'stop'
       }, '*');
     }
 
-    // Give iframe a moment to send final results, then cleanup
+    // Give iframe/sidepanel a moment to send final results, then cleanup
     setTimeout(() => {
       cleanup();
     }, 100);
@@ -282,6 +394,12 @@
     window.__utterActive = false;
     window.__utterTargetElement = null;
     window.__utterSessionText = '';
+    usingSidepanelFallback = false;
+    sidepanelSessionId = null;
+    if (iframeStartupTimer) {
+      clearTimeout(iframeStartupTimer);
+      iframeStartupTimer = null;
+    }
     removeIndicator();
     removeRecognitionFrame();
   }

@@ -1,10 +1,18 @@
 // Push-to-talk listener - runs on all pages
 // Listens for configured key combo to start/stop speech recognition
 // Uses an iframe to run speech recognition directly (no sidepanel needed)
+// Falls back to sidepanel when iframe fails due to CSP/Permissions-Policy
 
 (function () {
   const INDICATOR_ID = 'utter-listening-indicator';
   const IFRAME_ID = 'utter-recognition-frame';
+  const IFRAME_STARTUP_TIMEOUT = 3000; // 3 seconds to detect iframe failure
+  const PERMISSION_ERRORS = ['not-allowed', 'permission-denied', 'permission-dismissed'];
+
+  // Track if we're using sidepanel fallback
+  let usingSidepanelFallback = false;
+  let sidepanelSessionId = null;
+  let iframeStartupTimer = null;
 
   /**
    * @typedef {Object} KeyCombo
@@ -119,11 +127,27 @@
     handleRecognitionMessage(event.data);
   });
 
+  // Listen for sidepanel recognition messages (via background)
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.source !== 'utter-sidepanel') return;
+    if (message.sessionId !== sidepanelSessionId) return;
+    handleRecognitionMessage(message);
+  });
+
   function handleRecognitionMessage(message) {
     switch (message.type) {
       case 'recognition-started':
-        // Iframe shows its own "Listening..." status
-        removeIndicator(); // Remove any "Starting..." indicator
+        // Clear startup timer - iframe/sidepanel is working
+        if (iframeStartupTimer) {
+          clearTimeout(iframeStartupTimer);
+          iframeStartupTimer = null;
+        }
+        // Show indicator for sidepanel mode (recording happens in sidepanel)
+        if (usingSidepanelFallback) {
+          showIndicator('Listening... (via sidepanel)');
+        } else {
+          removeIndicator(); // Remove any "Starting..." indicator
+        }
         break;
 
       case 'recognition-result':
@@ -135,15 +159,24 @@
           // Accumulate text for this session
           window.__utterSessionText = (window.__utterSessionText || '') + message.finalTranscript;
         }
-        // Iframe shows interim transcription, no need for separate indicator
+        // Update interim display for sidepanel mode
+        if (usingSidepanelFallback && message.interimTranscript) {
+          showIndicator(`Listening: ${message.interimTranscript.substring(0, 30)}...`);
+        }
         break;
 
       case 'recognition-error':
         if (!message.recoverable) {
-          showIndicator(`Error: ${message.error}`, true);
+          // Check if this is a permission error that we should fallback for
+          if (!usingSidepanelFallback && PERMISSION_ERRORS.includes(message.error)) {
+            console.log('Utter PTT: Permission error in iframe, trying sidepanel fallback');
+            removeRecognitionFrame();
+            startSidepanelRecognition();
+            return;
+          }
+          showIndicator(getErrorMessage(message.error), true);
           cleanup();
         }
-        // Iframe shows recoverable errors
         break;
 
       case 'recognition-ended':
@@ -161,6 +194,23 @@
         }
         break;
     }
+  }
+
+  /**
+   * Map error codes to user-friendly messages
+   */
+  function getErrorMessage(errorCode) {
+    const errorMessages = {
+      'not-allowed': 'Microphone access blocked by this page',
+      'permission-denied': 'Microphone permission denied',
+      'permission-dismissed': 'Microphone permission request dismissed',
+      'no-speech': 'No speech detected',
+      'audio-capture': 'No microphone available',
+      'network': 'Network error - check your connection',
+      'aborted': 'Recognition was aborted',
+      'service-not-allowed': 'Speech service not available'
+    };
+    return errorMessages[errorCode] || `Error: ${errorCode}`;
   }
 
   async function handleRefinementComplete(text, audioDataUrl, targetElement) {
@@ -471,12 +521,58 @@
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
       `;
 
+      // Handle iframe load errors (CSP blocking the iframe src)
+      recognitionFrame.onerror = () => {
+        console.log('Utter PTT: Iframe load error, trying sidepanel fallback');
+        removeRecognitionFrame();
+        startSidepanelRecognition();
+      };
+
       document.body.appendChild(recognitionFrame);
       console.log('Utter PTT: Recognition frame created');
+
+      // Set up startup timeout - if we don't get recognition-started within timeout,
+      // assume iframe failed (e.g., Permissions-Policy blocking microphone)
+      iframeStartupTimer = setTimeout(() => {
+        if (!usingSidepanelFallback && (isKeyHeld || isRefinementKeyHeld)) {
+          console.log('Utter PTT: Iframe startup timeout, trying sidepanel fallback');
+          removeRecognitionFrame();
+          startSidepanelRecognition();
+        }
+      }, IFRAME_STARTUP_TIMEOUT);
+
     } catch (err) {
       console.error('Utter PTT: Failed to create recognition frame:', err);
-      showIndicator('Failed to start recognition', true);
-      isKeyHeld = false;
+      // Try sidepanel fallback
+      startSidepanelRecognition();
+    }
+  }
+
+  /**
+   * Start recognition using sidepanel (fallback mode)
+   */
+  async function startSidepanelRecognition() {
+    if (usingSidepanelFallback) return; // Already using fallback
+
+    usingSidepanelFallback = true;
+    showIndicator('Opening sidepanel...');
+
+    try {
+      sidepanelSessionId = Date.now().toString();
+      const response = await chrome.runtime.sendMessage({
+        type: 'start-sidepanel-recognition',
+        sessionId: sidepanelSessionId
+      });
+
+      if (!response?.success) {
+        throw new Error(response?.error || 'Failed to start sidepanel recognition');
+      }
+
+      console.log('Utter PTT: Sidepanel recognition started, session:', sidepanelSessionId);
+    } catch (err) {
+      console.error('Utter PTT: Failed to start sidepanel recognition:', err);
+      showIndicator(getErrorMessage(err.message || 'Failed to start recognition'), true);
+      cleanup();
     }
   }
 
@@ -493,15 +589,27 @@
   }
 
   function stopRecognition() {
-    // Send stop message to iframe
-    if (recognitionFrame?.contentWindow) {
+    // Clear startup timer if pending
+    if (iframeStartupTimer) {
+      clearTimeout(iframeStartupTimer);
+      iframeStartupTimer = null;
+    }
+
+    if (usingSidepanelFallback && sidepanelSessionId) {
+      // Stop sidepanel recognition
+      chrome.runtime.sendMessage({
+        type: 'stop-sidepanel-recognition',
+        sessionId: sidepanelSessionId
+      }).catch(() => {});
+    } else if (recognitionFrame?.contentWindow) {
+      // Send stop message to iframe
       recognitionFrame.contentWindow.postMessage({
         target: 'utter-recognition-frame',
         type: 'stop'
       }, '*');
     }
 
-    // Give iframe a moment to send final results, then remove
+    // Give iframe/sidepanel a moment to send final results, then remove
     setTimeout(() => {
       removeRecognitionFrame();
     }, 100);
@@ -612,6 +720,12 @@
     window.__utterSessionText = '';
     isRefinementRecording = false;
     activeRefinementPromptId = null;
+    usingSidepanelFallback = false;
+    sidepanelSessionId = null;
+    if (iframeStartupTimer) {
+      clearTimeout(iframeStartupTimer);
+      iframeStartupTimer = null;
+    }
     removeIndicator();
     removeRecognitionFrame();
   }
@@ -654,15 +768,27 @@
   }
 
   function stopRefinementRecording() {
-    // Send stop message to iframe (same as stopRecognition)
-    if (recognitionFrame?.contentWindow) {
+    // Clear startup timer if pending
+    if (iframeStartupTimer) {
+      clearTimeout(iframeStartupTimer);
+      iframeStartupTimer = null;
+    }
+
+    if (usingSidepanelFallback && sidepanelSessionId) {
+      // Stop sidepanel recognition
+      chrome.runtime.sendMessage({
+        type: 'stop-sidepanel-recognition',
+        sessionId: sidepanelSessionId
+      }).catch(() => {});
+    } else if (recognitionFrame?.contentWindow) {
+      // Send stop message to iframe
       recognitionFrame.contentWindow.postMessage({
         target: 'utter-recognition-frame',
         type: 'stop'
       }, '*');
     }
 
-    // Give iframe a moment to send final results, then remove
+    // Give iframe/sidepanel a moment to send final results, then remove
     setTimeout(() => {
       removeRecognitionFrame();
     }, 100);

@@ -687,15 +687,57 @@ function stopRecognition() {
 }
 ```
 
+#### Sidepanel Fallback (v2.2.0)
+
+While the iframe approach works on most pages, some websites use strict Content Security Policy (CSP) or Permissions-Policy headers that block microphone access even for extension iframes. For these cases, Utter uses a **sidepanel fallback**:
+
+**How It Works:**
+1. Content script attempts to create the recognition iframe (primary method)
+2. If the iframe fails to start recognition within 3 seconds, or returns a permission error:
+   - The iframe is removed
+   - The sidepanel is opened via `chrome.sidePanel.open()`
+   - Speech recognition runs in the sidepanel's extension context
+3. Results are routed: Sidepanel → Background Script → Content Script
+4. Text is inserted into the original page while recording happens in the sidepanel
+
+**Message Flow with Sidepanel Fallback:**
+```
+Content Script                    Background Script                   Sidepanel
+     │                                   │                              │
+     │  start-sidepanel-recognition      │                              │
+     │──────────────────────────────────>│  sidePanel.open()            │
+     │                                   │────────────────────────────->│
+     │                                   │  start-recognition           │
+     │                                   │────────────────────────────->│
+     │                                   │                              │
+     │                                   │  recognition-result          │
+     │  recognition-result               │<────────────────────────────│
+     │<──────────────────────────────────│                              │
+     │                                   │                              │
+     │  stop-sidepanel-recognition       │  stop-recognition            │
+     │──────────────────────────────────>│────────────────────────────->│
+```
+
+**Files Involved:**
+- `sidepanel/sidepanel.html` - Already existing sidepanel with full speech recognition
+- `sidepanel/sidepanel.js` - Handles recognition and sends results via chrome.runtime
+- `background.js` - Opens sidepanel and routes messages between sidepanel and content scripts
+- `content.js` / `ptt-listener.js` - Detect failures and trigger fallback
+
+**Why This Works:**
+- The sidepanel runs in the extension's origin, not the page's
+- It has unrestricted access to Web Speech API and microphone
+- CSP/Permissions-Policy headers on the page cannot affect extension context
+- Visual feedback is provided directly in the sidepanel
+
 #### Why Not Other Approaches?
 
 | Approach | Problem |
 |----------|---------|
-| Offscreen Document | Cannot access Web Speech API (headless context) |
 | Background Service Worker | No DOM, no Web Speech API |
-| Side Panel | Requires panel to be open; clunky UX |
+| Offscreen Document | Works but has lifecycle limitations |
 | Content Script Directly | Page's CSP may block microphone; conflicts with page scripts |
-| **Iframe (current)** | ✅ Works everywhere, isolated, lightweight |
+| **Iframe + Sidepanel Fallback (current)** | ✅ Best of both: lightweight iframe when possible, sidepanel for universal compatibility |
 
 #### Web Accessible Resources
 
