@@ -687,59 +687,57 @@ function stopRecognition() {
 }
 ```
 
-#### Offscreen Document Fallback (v2.2.0)
+#### Sidepanel Fallback (v2.2.0)
 
-While the iframe approach works on most pages, some websites use strict Content Security Policy (CSP) or Permissions-Policy headers that block microphone access even for extension iframes. For these cases, Utter uses an **offscreen document fallback**:
+While the iframe approach works on most pages, some websites use strict Content Security Policy (CSP) or Permissions-Policy headers that block microphone access even for extension iframes. For these cases, Utter uses a **sidepanel fallback**:
 
 **How It Works:**
 1. Content script attempts to create the recognition iframe (primary method)
 2. If the iframe fails to start recognition within 3 seconds, or returns a permission error:
    - The iframe is removed
-   - An offscreen document is created via `chrome.offscreen.createDocument()`
-   - Speech recognition runs in the offscreen document's extension context
-3. Results are routed: Offscreen → Background Script → Content Script
-4. The offscreen document is closed when recognition ends
+   - The sidepanel is opened via `chrome.sidePanel.open()`
+   - Speech recognition runs in the sidepanel's extension context
+3. Results are routed: Sidepanel → Background Script → Content Script
+4. Text is inserted into the original page while recording happens in the sidepanel
 
-**Message Flow with Offscreen Fallback:**
+**Message Flow with Sidepanel Fallback:**
 ```
-Content Script                    Background Script               Offscreen Document
+Content Script                    Background Script                   Sidepanel
      │                                   │                              │
-     │  start-offscreen-recognition      │                              │
-     │──────────────────────────────────>│  createDocument()            │
+     │  start-sidepanel-recognition      │                              │
+     │──────────────────────────────────>│  sidePanel.open()            │
      │                                   │────────────────────────────->│
-     │                                   │  start recognition           │
+     │                                   │  start-recognition           │
      │                                   │────────────────────────────->│
      │                                   │                              │
      │                                   │  recognition-result          │
      │  recognition-result               │<────────────────────────────│
      │<──────────────────────────────────│                              │
      │                                   │                              │
-     │  stop-offscreen-recognition       │  stop                        │
+     │  stop-sidepanel-recognition       │  stop-recognition            │
      │──────────────────────────────────>│────────────────────────────->│
-     │                                   │  closeDocument()             │
-     │                                   │────────────────────────────->│
 ```
 
 **Files Involved:**
-- `offscreen/offscreen.html` - Minimal HTML document
-- `offscreen/offscreen.js` - Speech recognition logic (mirrors recognition-frame.js)
-- `background.js` - Handles offscreen document lifecycle and message routing
+- `sidepanel/sidepanel.html` - Already existing sidepanel with full speech recognition
+- `sidepanel/sidepanel.js` - Handles recognition and sends results via chrome.runtime
+- `background.js` - Opens sidepanel and routes messages between sidepanel and content scripts
 - `content.js` / `ptt-listener.js` - Detect failures and trigger fallback
 
 **Why This Works:**
-- Offscreen documents run in the extension's origin, not the page's
-- They have unrestricted access to Web Speech API and microphone
+- The sidepanel runs in the extension's origin, not the page's
+- It has unrestricted access to Web Speech API and microphone
 - CSP/Permissions-Policy headers on the page cannot affect extension context
+- Visual feedback is provided directly in the sidepanel
 
 #### Why Not Other Approaches?
 
 | Approach | Problem |
 |----------|---------|
-| Offscreen Document Only | Works but no visual feedback (no DOM for UI) |
 | Background Service Worker | No DOM, no Web Speech API |
-| Side Panel | Requires panel to be open; clunky UX |
+| Offscreen Document | Works but has lifecycle limitations |
 | Content Script Directly | Page's CSP may block microphone; conflicts with page scripts |
-| **Iframe + Offscreen Fallback (current)** | ✅ Best of both: visual feedback when possible, universal compatibility |
+| **Iframe + Sidepanel Fallback (current)** | ✅ Best of both: lightweight iframe when possible, sidepanel for universal compatibility |
 
 #### Web Accessible Resources
 

@@ -1,6 +1,6 @@
 // Content script for speech recognition UI and text insertion
 // Uses iframe for speech recognition (like PTT mode)
-// Falls back to offscreen document when iframe fails due to CSP/Permissions-Policy
+// Falls back to sidepanel when iframe fails due to CSP/Permissions-Policy
 
 (async function () {
   const INDICATOR_ID = 'utter-listening-indicator';
@@ -8,9 +8,9 @@
   const IFRAME_STARTUP_TIMEOUT = 3000; // 3 seconds to detect iframe failure
   const PERMISSION_ERRORS = ['not-allowed', 'permission-denied', 'permission-dismissed'];
 
-  // Track if we're using offscreen fallback
-  let usingOffscreenFallback = false;
-  let offscreenSessionId = null;
+  // Track if we're using sidepanel fallback
+  let usingSidepanelFallback = false;
+  let sidepanelSessionId = null;
   let iframeStartupTimer = null;
 
   // Check if extension context is still valid
@@ -73,14 +73,14 @@
     window.addEventListener('message', window.__utterMessageListener);
   }
 
-  // Set up listener for offscreen recognition messages (via background)
-  if (!window.__utterOffscreenListener) {
-    window.__utterOffscreenListener = (message) => {
-      if (message?.source !== 'utter-offscreen') return;
-      if (message.sessionId !== offscreenSessionId) return;
+  // Set up listener for sidepanel recognition messages (via background)
+  if (!window.__utterSidepanelListener) {
+    window.__utterSidepanelListener = (message) => {
+      if (message?.source !== 'utter-sidepanel') return;
+      if (message.sessionId !== sidepanelSessionId) return;
       handleRecognitionMessage(message);
     };
-    chrome.runtime.onMessage.addListener(window.__utterOffscreenListener);
+    chrome.runtime.onMessage.addListener(window.__utterSidepanelListener);
   }
 
   // Create the recognition iframe
@@ -91,14 +91,14 @@
 
     switch (message.type) {
       case 'recognition-started':
-        // Clear startup timer - iframe/offscreen is working
+        // Clear startup timer - iframe/sidepanel is working
         if (iframeStartupTimer) {
           clearTimeout(iframeStartupTimer);
           iframeStartupTimer = null;
         }
-        // Show indicator for offscreen mode (no visible iframe UI)
-        if (usingOffscreenFallback) {
-          showIndicator('Listening... (fallback mode)');
+        // Show indicator for sidepanel mode (recording happens in sidepanel)
+        if (usingSidepanelFallback) {
+          showIndicator('Listening... (via sidepanel)');
         } else {
           removeIndicator();
         }
@@ -110,8 +110,8 @@
           // Accumulate text for this session
           window.__utterSessionText += message.finalTranscript;
         }
-        // Update interim display for offscreen mode
-        if (usingOffscreenFallback && message.interimTranscript) {
+        // Update interim display for sidepanel mode
+        if (usingSidepanelFallback && message.interimTranscript) {
           showIndicator(`Listening: ${message.interimTranscript.substring(0, 30)}...`);
         }
         break;
@@ -119,10 +119,10 @@
       case 'recognition-error':
         if (!message.recoverable) {
           // Check if this is a permission error that we should fallback for
-          if (!usingOffscreenFallback && PERMISSION_ERRORS.includes(message.error)) {
-            console.log('Utter Content: Permission error in iframe, trying offscreen fallback');
+          if (!usingSidepanelFallback && PERMISSION_ERRORS.includes(message.error)) {
+            console.log('Utter Content: Permission error in iframe, trying sidepanel fallback');
             removeRecognitionFrame();
-            startOffscreenRecognition();
+            startSidepanelRecognition();
             return;
           }
           showIndicator(getErrorMessage(message.error), true);
@@ -182,9 +182,9 @@
 
       // Handle iframe load errors (CSP blocking the iframe src)
       window.__utterRecognitionFrame.onerror = () => {
-        console.log('Utter: Iframe load error, trying offscreen fallback');
+        console.log('Utter: Iframe load error, trying sidepanel fallback');
         removeRecognitionFrame();
-        startOffscreenRecognition();
+        startSidepanelRecognition();
       };
 
       document.body.appendChild(window.__utterRecognitionFrame);
@@ -193,43 +193,43 @@
       // Set up startup timeout - if we don't get recognition-started within timeout,
       // assume iframe failed (e.g., Permissions-Policy blocking microphone)
       iframeStartupTimer = setTimeout(() => {
-        if (!usingOffscreenFallback && window.__utterActive) {
-          console.log('Utter: Iframe startup timeout, trying offscreen fallback');
+        if (!usingSidepanelFallback && window.__utterActive) {
+          console.log('Utter: Iframe startup timeout, trying sidepanel fallback');
           removeRecognitionFrame();
-          startOffscreenRecognition();
+          startSidepanelRecognition();
         }
       }, IFRAME_STARTUP_TIMEOUT);
 
     } catch (err) {
       console.error('Utter: Failed to create recognition frame:', err);
-      // Try offscreen fallback
-      startOffscreenRecognition();
+      // Try sidepanel fallback
+      startSidepanelRecognition();
     }
   }
 
   /**
-   * Start recognition using offscreen document (fallback mode)
+   * Start recognition using sidepanel (fallback mode)
    */
-  async function startOffscreenRecognition() {
-    if (usingOffscreenFallback) return; // Already using fallback
+  async function startSidepanelRecognition() {
+    if (usingSidepanelFallback) return; // Already using fallback
 
-    usingOffscreenFallback = true;
-    showIndicator('Starting... (fallback mode)');
+    usingSidepanelFallback = true;
+    showIndicator('Opening sidepanel...');
 
     try {
-      offscreenSessionId = Date.now().toString();
+      sidepanelSessionId = Date.now().toString();
       const response = await chrome.runtime.sendMessage({
-        type: 'start-offscreen-recognition',
-        sessionId: offscreenSessionId
+        type: 'start-sidepanel-recognition',
+        sessionId: sidepanelSessionId
       });
 
       if (!response?.success) {
-        throw new Error(response?.error || 'Failed to start fallback recognition');
+        throw new Error(response?.error || 'Failed to start sidepanel recognition');
       }
 
-      console.log('Utter: Offscreen recognition started, session:', offscreenSessionId);
+      console.log('Utter: Sidepanel recognition started, session:', sidepanelSessionId);
     } catch (err) {
-      console.error('Utter: Failed to start offscreen recognition:', err);
+      console.error('Utter: Failed to start sidepanel recognition:', err);
       showIndicator(getErrorMessage(err.message || 'Failed to start recognition'), true);
       cleanup();
     }
@@ -254,11 +254,11 @@
       iframeStartupTimer = null;
     }
 
-    if (usingOffscreenFallback && offscreenSessionId) {
-      // Stop offscreen recognition
+    if (usingSidepanelFallback && sidepanelSessionId) {
+      // Stop sidepanel recognition
       chrome.runtime.sendMessage({
-        type: 'stop-offscreen-recognition',
-        sessionId: offscreenSessionId
+        type: 'stop-sidepanel-recognition',
+        sessionId: sidepanelSessionId
       }).catch(() => {});
     } else if (window.__utterRecognitionFrame?.contentWindow) {
       // Send stop message to iframe
@@ -268,7 +268,7 @@
       }, '*');
     }
 
-    // Give iframe/offscreen a moment to send final results, then cleanup
+    // Give iframe/sidepanel a moment to send final results, then cleanup
     setTimeout(() => {
       cleanup();
     }, 100);
@@ -394,8 +394,8 @@
     window.__utterActive = false;
     window.__utterTargetElement = null;
     window.__utterSessionText = '';
-    usingOffscreenFallback = false;
-    offscreenSessionId = null;
+    usingSidepanelFallback = false;
+    sidepanelSessionId = null;
     if (iframeStartupTimer) {
       clearTimeout(iframeStartupTimer);
       iframeStartupTimer = null;

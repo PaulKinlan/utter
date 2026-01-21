@@ -4,53 +4,9 @@ import { refineWithPreset, refineWithCustomPrompt, checkAvailability, PRESET_PRO
 
 console.log('Utter service worker loaded');
 
-// Offscreen document management
-const OFFSCREEN_DOCUMENT_PATH = 'offscreen/offscreen.html';
-let creatingOffscreen = null;
+// Sidepanel fallback session management
 /** @type {Map<string, {tabId: number, frameId?: number}>} */
 const activeSessions = new Map();
-
-/**
- * Create the offscreen document if it doesn't exist
- */
-async function setupOffscreenDocument() {
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
-  });
-
-  if (existingContexts.length > 0) {
-    return;
-  }
-
-  if (creatingOffscreen) {
-    await creatingOffscreen;
-    return;
-  }
-
-  creatingOffscreen = chrome.offscreen.createDocument({
-    url: OFFSCREEN_DOCUMENT_PATH,
-    reasons: ['USER_MEDIA'],
-    justification: 'Speech recognition fallback when page blocks microphone access'
-  });
-
-  await creatingOffscreen;
-  creatingOffscreen = null;
-}
-
-/**
- * Close the offscreen document
- */
-async function closeOffscreenDocument() {
-  const existingContexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT'],
-    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOCUMENT_PATH)]
-  });
-
-  if (existingContexts.length > 0) {
-    await chrome.offscreen.closeDocument();
-  }
-}
 
 // Open side panel when extension icon is clicked
 chrome.action.onClicked.addListener(async (tab) => {
@@ -88,25 +44,28 @@ chrome.commands.onCommand.addListener(async (command) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Utter Background: Received message:', message, 'from:', sender);
 
-  // Handle offscreen recognition start request from content scripts
-  if (message.type === 'start-offscreen-recognition') {
-    handleStartOffscreenRecognition(message, sender)
+  // Handle sidepanel recognition start request from content scripts
+  if (message.type === 'start-sidepanel-recognition') {
+    handleStartSidepanelRecognition(message, sender)
       .then(result => sendResponse(result))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
-  // Handle offscreen recognition stop request from content scripts
-  if (message.type === 'stop-offscreen-recognition') {
-    handleStopOffscreenRecognition(message.sessionId)
+  // Handle sidepanel recognition stop request from content scripts
+  if (message.type === 'stop-sidepanel-recognition') {
+    handleStopSidepanelRecognition(message.sessionId)
       .then(() => sendResponse({ success: true }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true;
   }
 
-  // Handle messages from offscreen document - route to content scripts
-  if (message.source === 'offscreen-recognition') {
-    handleOffscreenMessage(message);
+  // Handle messages from sidepanel - route to content scripts
+  if (message.type === 'recognition-started' ||
+      message.type === 'recognition-result' ||
+      message.type === 'recognition-error' ||
+      message.type === 'recognition-ended') {
+    handleSidepanelRecognitionMessage(message);
     return false;
   }
 
@@ -183,9 +142,9 @@ async function handleRefineText(message) {
 }
 
 /**
- * Handle start offscreen recognition request
+ * Handle start sidepanel recognition request (fallback when iframe fails)
  */
-async function handleStartOffscreenRecognition(message, sender) {
+async function handleStartSidepanelRecognition(message, sender) {
   const sessionId = message.sessionId || Date.now().toString();
   const tabId = sender.tab?.id;
 
@@ -196,70 +155,79 @@ async function handleStartOffscreenRecognition(message, sender) {
   // Store session info for routing messages back
   activeSessions.set(sessionId, { tabId, frameId: sender.frameId });
 
-  // Create offscreen document if needed
-  await setupOffscreenDocument();
-
-  // Send start message to offscreen document
-  const response = await chrome.runtime.sendMessage({
-    target: 'offscreen-recognition',
-    type: 'start',
-    sessionId
-  });
-
-  if (!response?.success) {
+  // Open the sidepanel for the tab
+  try {
+    await chrome.sidePanel.open({ tabId });
+  } catch (err) {
+    console.error('Utter Background: Failed to open sidepanel:', err);
     activeSessions.delete(sessionId);
-    throw new Error(response?.error || 'Failed to start recognition');
+    throw new Error('Failed to open sidepanel');
   }
 
-  return { success: true, sessionId };
+  // Give sidepanel a moment to initialize, then send start message
+  await new Promise(resolve => setTimeout(resolve, 300));
+
+  // Send start message to sidepanel
+  try {
+    const response = await chrome.runtime.sendMessage({
+      target: 'sidepanel',
+      type: 'start-recognition',
+      sessionId
+    });
+
+    if (!response?.success) {
+      activeSessions.delete(sessionId);
+      throw new Error(response?.error || 'Failed to start recognition in sidepanel');
+    }
+
+    return { success: true, sessionId };
+  } catch {
+    activeSessions.delete(sessionId);
+    throw new Error('Sidepanel not responding');
+  }
 }
 
 /**
- * Handle stop offscreen recognition request
+ * Handle stop sidepanel recognition request
  */
-async function handleStopOffscreenRecognition(sessionId) {
+async function handleStopSidepanelRecognition(sessionId) {
   if (!sessionId) {
     throw new Error('No session ID provided');
   }
 
   try {
     await chrome.runtime.sendMessage({
-      target: 'offscreen-recognition',
-      type: 'stop',
+      target: 'sidepanel',
+      type: 'stop-recognition',
       sessionId
     });
   } catch {
-    // Offscreen document may already be closed
+    // Sidepanel may not be open
   }
 
   activeSessions.delete(sessionId);
-
-  // Close offscreen document if no more active sessions
-  if (activeSessions.size === 0) {
-    await closeOffscreenDocument().catch(() => {});
-  }
 }
 
 /**
- * Handle messages from offscreen document and route to content scripts
+ * Handle messages from sidepanel and route to content scripts
  */
-function handleOffscreenMessage(message) {
+function handleSidepanelRecognitionMessage(message) {
   const { sessionId, type, ...data } = message;
 
   if (!sessionId) {
-    console.warn('Utter Background: Offscreen message without sessionId');
+    // Not a fallback session, ignore (sidepanel can also record independently)
     return;
   }
 
   const session = activeSessions.get(sessionId);
   if (!session) {
-    console.warn('Utter Background: No active session for:', sessionId);
+    // Not a tracked fallback session
     return;
   }
 
   // Route message to content script
   chrome.tabs.sendMessage(session.tabId, {
-    source: 'utter-offscreen',
+    source: 'utter-sidepanel',
     type,
     sessionId,
     ...data
@@ -270,9 +238,6 @@ function handleOffscreenMessage(message) {
   // Clean up session on recognition ended
   if (type === 'recognition-ended') {
     activeSessions.delete(sessionId);
-    if (activeSessions.size === 0) {
-      closeOffscreenDocument().catch(() => {});
-    }
   }
 }
 

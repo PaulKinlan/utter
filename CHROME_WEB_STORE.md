@@ -114,15 +114,10 @@ All data is stored locally using `chrome.storage.local` and is never transmitted
 
 ### Permission: `sidePanel`
 
-**Justification:** Required to display the voice input history panel. The side panel shows users their past transcriptions with timestamps and source page URLs, allowing them to review or delete entries. This feature is optional and the extension works fully without opening the side panel.
-
-### Permission: `offscreen`
-
-**Justification:** Required as a fallback mechanism for speech recognition on pages that block microphone access. Some websites use Content Security Policy (CSP) or Permissions-Policy headers that prevent the extension's iframe from accessing the microphone. The offscreen document provides unrestricted microphone access in the extension's own context, ensuring voice-to-text works on all websites. The offscreen document:
-1. Is only created when the primary iframe-based recognition fails
-2. Runs speech recognition using the same Web Speech API
-3. Is closed immediately after use to conserve resources
-4. Does not access or modify any page content
+**Justification:** Required to display the voice input history panel and as a fallback for speech recognition. The side panel:
+1. Shows users their past transcriptions with timestamps and source page URLs, allowing them to review or delete entries
+2. Provides a fallback for speech recognition on pages that block microphone access via Content Security Policy (CSP) or Permissions-Policy headers
+3. When used as fallback, the sidepanel runs speech recognition in the extension's context where it has unrestricted microphone access, then routes transcribed text back to the page
 
 ### Host Permission: `<all_urls>` (Content Scripts)
 
@@ -207,8 +202,8 @@ Required screenshots to create:
 ### v2.2.0 (Current)
 - **NEW:** Automatic fallback for restricted pages — Voice input now works on sites with strict Content Security Policy (CSP) or Permissions-Policy headers that block microphone access
 - **IMPROVED:** Better error messages — Clear, user-friendly feedback when issues occur (e.g., "Microphone access blocked by this page")
-- **IMPROVED:** Fallback mode indicator — Shows "(fallback mode)" when using the offscreen fallback so users know the extension adapted
-- Under the hood: Added offscreen document as fallback when iframe-based recognition fails
+- **IMPROVED:** Fallback mode indicator — Shows "(via sidepanel)" when using the sidepanel fallback so users know the extension adapted
+- Under the hood: Uses sidepanel as fallback when iframe-based recognition fails on restricted pages
 
 ### v2.1.0
 - **NEW:** Audio device priority system — set a priority order for microphones
