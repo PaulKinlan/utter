@@ -254,6 +254,13 @@
   }
 
   async function handleRefinementComplete(text, audioDataUrl, targetElement) {
+    // Validate text is not empty before attempting refinement
+    if (!text || text.trim().length === 0) {
+      console.log('Utter PTT: No text to refine, skipping');
+      cleanup();
+      return;
+    }
+
     showIndicator('Refining text...');
 
     try {
