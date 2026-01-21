@@ -1,5 +1,34 @@
-// @ts-nocheck
 // Side panel script - handles speech recognition and displays history
+
+(function() {
+
+/**
+ * @typedef {Object} HistoryEntry
+ * @property {string} id
+ * @property {string} text
+ * @property {string} [refinedText]
+ * @property {number} timestamp
+ * @property {string} url
+ * @property {string} [audioDataUrl]
+ */
+
+/**
+ * @typedef {Object} KeyCombo
+ * @property {boolean} ctrlKey
+ * @property {boolean} shiftKey
+ * @property {boolean} altKey
+ * @property {boolean} metaKey
+ * @property {string} key
+ * @property {string} code
+ */
+
+/**
+ * @typedef {Object} CustomRefinementPrompt
+ * @property {string} id
+ * @property {string} name
+ * @property {string} prompt
+ * @property {KeyCombo} [hotkey]
+ */
 
 // DOM elements
 const historyList = document.getElementById('history-list');
@@ -9,13 +38,18 @@ const recordingSection = document.getElementById('recording-section');
 const interimTextEl = document.getElementById('interim-text');
 const stopRecordingBtn = document.getElementById('stop-recording');
 
+/** @type {HistoryEntry[]} */
 let history = [];
 
 // Shortcuts info
+/** @type {string | null} */
 let toggleShortcut = null;
+/** @type {KeyCombo | null} */
 let pttKeyCombo = null;
 let refinementEnabled = false;
+/** @type {Object<string, KeyCombo>} */
 let refinementHotkeys = {};
+/** @type {CustomRefinementPrompt[]} */
 let customRefinementPrompts = [];
 
 // Preset prompt names for display
@@ -28,11 +62,16 @@ const PRESET_NAMES = {
 };
 
 // Speech recognition state
+/** @type {any} */
 let recognition = null;
+/** @type {MediaStream | null} */
 let micStream = null;
+/** @type {MediaRecorder | null} */
 let mediaRecorder = null;
+/** @type {Blob[]} */
 let audioChunks = [];
 let sessionText = ''; // Accumulate all final text from this session
+/** @type {string | null} */
 let currentSessionId = null;
 let lastInterimTranscript = ''; // Track last interim text for when recognition stops
 
@@ -76,9 +115,9 @@ async function loadSettings() {
       'soundFeedbackEnabled',
       'audioVolume'
     ]);
-    settings.selectedMicrophone = result.selectedMicrophone || '';
+    settings.selectedMicrophone = typeof result.selectedMicrophone === 'string' ? result.selectedMicrophone : '';
     settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
-    settings.audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
+    settings.audioVolume = typeof result.audioVolume === 'number' ? result.audioVolume : 0.5;
   } catch (err) {
     console.error('Utter Sidepanel: Error loading settings:', err);
   }
@@ -101,11 +140,16 @@ async function loadShortcuts() {
       'customRefinementPrompts'
     ]);
     if (result.pttKeyCombo) {
-      pttKeyCombo = result.pttKeyCombo;
+      pttKeyCombo = /** @type {KeyCombo} */ (result.pttKeyCombo);
     }
     refinementEnabled = result.refinementEnabled === true;
-    refinementHotkeys = result.refinementHotkeys || {};
-    customRefinementPrompts = result.customRefinementPrompts || [];
+    const hotkeys = result.refinementHotkeys;
+    refinementHotkeys = (hotkeys && typeof hotkeys === 'object' && !Array.isArray(hotkeys))
+      ? /** @type {Object<string, KeyCombo>} */ (hotkeys)
+      : {};
+    customRefinementPrompts = Array.isArray(result.customRefinementPrompts)
+      ? /** @type {CustomRefinementPrompt[]} */ (result.customRefinementPrompts)
+      : [];
   } catch (err) {
     console.error('Utter Sidepanel: Error loading shortcuts:', err);
   }
@@ -114,20 +158,28 @@ async function loadShortcuts() {
 function setupStorageListeners() {
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.utterHistory) {
-      history = changes.utterHistory.newValue || [];
+      history = Array.isArray(changes.utterHistory.newValue)
+        ? /** @type {HistoryEntry[]} */ (changes.utterHistory.newValue)
+        : [];
       renderHistory();
     }
     if (changes.selectedMicrophone) {
-      settings.selectedMicrophone = changes.selectedMicrophone.newValue || '';
+      settings.selectedMicrophone = typeof changes.selectedMicrophone.newValue === 'string'
+        ? changes.selectedMicrophone.newValue
+        : '';
     }
     if (changes.soundFeedbackEnabled) {
       settings.soundFeedbackEnabled = changes.soundFeedbackEnabled.newValue !== false;
     }
     if (changes.audioVolume) {
-      settings.audioVolume = changes.audioVolume.newValue !== undefined ? changes.audioVolume.newValue : 0.5;
+      settings.audioVolume = typeof changes.audioVolume.newValue === 'number'
+        ? changes.audioVolume.newValue
+        : 0.5;
     }
     if (changes.pttKeyCombo) {
-      pttKeyCombo = changes.pttKeyCombo.newValue || null;
+      pttKeyCombo = changes.pttKeyCombo.newValue
+        ? /** @type {KeyCombo} */ (changes.pttKeyCombo.newValue)
+        : null;
       // Re-render if showing empty state to update shortcuts display
       if (history.length === 0) {
         renderHistory();
@@ -141,14 +193,19 @@ function setupStorageListeners() {
       }
     }
     if (changes.refinementHotkeys) {
-      refinementHotkeys = changes.refinementHotkeys.newValue || {};
+      const newHotkeys = changes.refinementHotkeys.newValue;
+      refinementHotkeys = (newHotkeys && typeof newHotkeys === 'object' && !Array.isArray(newHotkeys))
+        ? /** @type {Object<string, KeyCombo>} */ (newHotkeys)
+        : {};
       // Re-render if showing empty state to update shortcuts display
       if (history.length === 0) {
         renderHistory();
       }
     }
     if (changes.customRefinementPrompts) {
-      customRefinementPrompts = changes.customRefinementPrompts.newValue || [];
+      customRefinementPrompts = Array.isArray(changes.customRefinementPrompts.newValue)
+        ? /** @type {CustomRefinementPrompt[]} */ (changes.customRefinementPrompts.newValue)
+        : [];
       // Re-render if showing empty state to update shortcuts display
       if (history.length === 0) {
         renderHistory();
@@ -520,7 +577,9 @@ stopRecordingBtn.addEventListener('click', () => {
 async function loadHistory() {
   try {
     const result = await chrome.storage.local.get(['utterHistory']);
-    history = result.utterHistory || [];
+    history = Array.isArray(result.utterHistory)
+      ? /** @type {HistoryEntry[]} */ (result.utterHistory)
+      : [];
   } catch (err) {
     console.error('Error loading history:', err);
     history = [];
@@ -1189,3 +1248,5 @@ settingsBtn.addEventListener('click', () => {
 });
 
 console.log('Utter Sidepanel: Loaded and ready');
+
+})();
