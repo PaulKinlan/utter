@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Content script for speech recognition UI and text insertion
 // Uses iframe for speech recognition (like PTT mode)
 

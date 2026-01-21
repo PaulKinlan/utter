@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Side panel script - handles speech recognition and displays history
 
 // DOM elements

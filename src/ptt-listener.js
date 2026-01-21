@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Push-to-talk listener - runs on all pages
 // Listens for configured key combo to start/stop speech recognition
 // Uses an iframe to run speech recognition directly (no sidepanel needed)

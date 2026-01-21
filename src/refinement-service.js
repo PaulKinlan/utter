@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Text refinement service using Chrome Prompt API (Gemini Nano)
 // API Reference: https://developer.chrome.com/docs/ai/prompt-api
 // Uses window.LanguageModel API

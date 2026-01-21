@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Options page script
 
 import { PRESET_PROMPTS, checkAvailability, getAvailablePrompts, ensureModelReady } from '../refinement-service.js';

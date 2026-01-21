@@ -66,6 +66,12 @@ npm run package
 # Run linting
 npm run lint
 
+# Run type checking
+npm run typecheck
+
+# Run tests
+npm run test
+
 # Regenerate placeholder icons
 npm run generate-icons
 ```
@@ -120,18 +126,25 @@ Run `npm run generate-icons` to create placeholder icons if missing.
 
 ### Code Quality Requirements (MANDATORY)
 
-**Linting must pass before committing any changes.** This is enforced by CI on GitHub.
+**Linting and type checking must pass before committing any changes.** This is enforced by CI on GitHub.
 
 Before committing:
 1. Run `npm run lint` to check for lint errors
-2. Fix all errors and warnings before committing
-3. Do not commit code with lint failures - the CI build will fail
+2. Run `npm run typecheck` to check for type errors
+3. Fix all errors and warnings before committing
+4. Do not commit code with lint or type check failures - the CI build will fail
 
 Common lint issues to avoid:
 - Unused variables or imports (remove them or prefix with `_` if intentionally unused)
 - Unused function parameters in callbacks (use `_` prefix, e.g., `(_unused) => {}`)
 - Undefined variables
 - Missing semicolons (if configured)
+
+Type checking notes:
+- TypeScript is configured for JavaScript type checking via `checkJs`
+- Files with `// @ts-nocheck` at the top are excluded from type checking
+- Custom type declarations for window globals are in `src/global.d.ts`
+- Test files are excluded from type checking (they use mock objects)
 
 ### Speech Recognition Architecture (DO NOT REGRESS)
 

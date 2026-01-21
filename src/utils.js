@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Shared utility functions for Utter extension
 
 /**

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Recognition frame - runs speech recognition in an iframe context
 // This allows PTT to work without the sidepanel being open
 
