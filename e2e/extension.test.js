@@ -12,7 +12,7 @@ describe.skipIf(!chromePath)('Utter Extension E2E Tests', () => {
     const extensionPath = getExtensionPath();
 
     browser = await puppeteer.launch({
-      headless: false,
+      headless: 'new', // New headless mode supports extensions
       executablePath: chromePath,
       args: [
         `--disable-extensions-except=${extensionPath}`,
@@ -20,7 +20,6 @@ describe.skipIf(!chromePath)('Utter Extension E2E Tests', () => {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--headless=new',
       ],
     });
 

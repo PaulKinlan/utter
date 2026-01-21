@@ -69,40 +69,39 @@ export function getExtensionPath() {
 
 /**
  * Wait for the extension service worker target to be available.
- * MV3 service workers register asynchronously, so we need to poll.
+ * MV3 service workers register asynchronously, so we need to wait.
  * @param {import('puppeteer-core').Browser} browser
  * @param {number} timeout - Maximum time to wait in ms
  * @returns {Promise<string>} The extension ID
  */
-export async function waitForExtensionId(browser, timeout = 10000) {
-  const startTime = Date.now();
+export async function waitForExtensionId(browser, timeout = 30000) {
+  // Open a blank page to help trigger extension activation
+  const page = await browser.newPage();
+  await page.goto('about:blank');
 
-  while (Date.now() - startTime < timeout) {
+  try {
+    // Use waitForTarget which is more reliable than manual polling
+    const extensionTarget = await browser.waitForTarget(
+      (target) => target.url().startsWith('chrome-extension://'),
+      { timeout }
+    );
+
+    const url = extensionTarget.url();
+    const extensionId = url.split('/')[2];
+
+    await page.close();
+    return extensionId;
+  } catch (error) {
+    // On failure, gather debug info
     const targets = await browser.targets();
+    const targetInfo = targets.map((t) => `${t.type()}: ${t.url()}`).join('\n  ');
 
-    // First, try to find the service worker (preferred for MV3)
-    const serviceWorkerTarget = targets.find(
-      (target) => target.type() === 'service_worker' && target.url().startsWith('chrome-extension://')
+    await page.close();
+
+    throw new Error(
+      `Extension not found within ${timeout}ms.\n` +
+      `Available targets:\n  ${targetInfo || '(none)'}\n` +
+      `Ensure the extension is built and the dist/ directory contains a valid manifest.json.`
     );
-
-    if (serviceWorkerTarget) {
-      const url = serviceWorkerTarget.url();
-      return url.split('/')[2];
-    }
-
-    // Fallback: look for any extension target
-    const extensionTarget = targets.find(
-      (target) => target.url().startsWith('chrome-extension://')
-    );
-
-    if (extensionTarget) {
-      const url = extensionTarget.url();
-      return url.split('/')[2];
-    }
-
-    // Wait 100ms before retrying
-    await new Promise((resolve) => setTimeout(resolve, 100));
   }
-
-  throw new Error(`Extension not found within ${timeout}ms. Ensure the extension loaded correctly.`);
 }
