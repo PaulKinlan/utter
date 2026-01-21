@@ -16,14 +16,41 @@ interface Window {
     text: string;
     isContentEditable: boolean;
   } | null;
-  __utterLastTranscription?: string;
+  __utterLastTranscription?: {
+    id: string;
+    text: string;
+    timestamp: number;
+    url: string;
+    audioDataUrl?: string;
+  };
 
   // Web Speech API (webkit prefixed)
   webkitSpeechRecognition?: typeof SpeechRecognition;
   webkitAudioContext?: typeof AudioContext;
 }
 
+
 // Chrome Prompt API (LanguageModel) - experimental API
+// API Reference: https://developer.chrome.com/docs/ai/prompt-api
+
+/** Download progress event for model downloads */
+interface LanguageModelDownloadProgressEvent {
+  loaded: number;
+  total: number;
+}
+
+/** Monitor for tracking model download progress */
+interface LanguageModelDownloadMonitor extends EventTarget {
+  addEventListener(
+    type: 'downloadprogress',
+    listener: (event: LanguageModelDownloadProgressEvent) => void
+  ): void;
+  removeEventListener(
+    type: 'downloadprogress',
+    listener: (event: LanguageModelDownloadProgressEvent) => void
+  ): void;
+}
+
 declare const LanguageModel: {
   availability(): Promise<'available' | 'downloading' | 'unavailable'>;
   params(): Promise<{
@@ -37,6 +64,7 @@ declare const LanguageModel: {
     topK?: number;
     initialPrompts?: Array<{ role: string; content: string }>;
     signal?: AbortSignal;
+    monitor?: (monitor: LanguageModelDownloadMonitor) => void;
   }): Promise<LanguageModelSession>;
 };
 

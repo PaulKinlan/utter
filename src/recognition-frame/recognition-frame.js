@@ -1,24 +1,44 @@
-// @ts-nocheck
 // Recognition frame - runs speech recognition in an iframe context
 // This allows PTT to work without the sidepanel being open
+
+(function() {
 
 const statusText = document.getElementById('status-text');
 const interimEl = document.getElementById('interim');
 const pulseEl = document.getElementById('pulse');
-const frequencyCanvas = document.getElementById('frequency-canvas');
+/** @type {HTMLCanvasElement} */
+const frequencyCanvas = /** @type {HTMLCanvasElement} */ (document.getElementById('frequency-canvas'));
 const canvasCtx = frequencyCanvas.getContext('2d');
 
+/** @type {any} */
 let recognition = null;
+/** @type {MediaStream | null} */
 let micStream = null;
+/** @type {MediaRecorder | null} */
 let mediaRecorder = null;
+/** @type {Blob[]} */
 let audioChunks = [];
+/** @type {AudioContext | null} */
 let audioContext = null;
+/** @type {AnalyserNode | null} */
 let analyser = null;
+/** @type {number | null} */
 let animationId = null;
+/** @type {MediaStreamAudioSourceNode | null} */
 let mediaStreamSource = null;
+/** @type {Uint8Array<ArrayBuffer> | null} */
 let frequencyDataArray = null;
+
+/**
+ * @typedef {Object} AudioDevicePriority
+ * @property {string} deviceId
+ * @property {string} label
+ * @property {number} lastSeen
+ */
+
+/** @type {{audioDevicePriority: AudioDevicePriority[], soundFeedbackEnabled: boolean, audioVolume: number}} */
 let settings = {
-  audioDevicePriority: [], // Array of { deviceId, label, lastSeen }
+  audioDevicePriority: [],
   soundFeedbackEnabled: true,
   audioVolume: 0.5
 };
@@ -48,19 +68,21 @@ async function loadSettings() {
       'soundFeedbackEnabled',
       'audioVolume'
     ]);
-    settings.audioDevicePriority = result.audioDevicePriority || [];
+    settings.audioDevicePriority = Array.isArray(result.audioDevicePriority)
+      ? result.audioDevicePriority
+      : [];
 
     // Migrate legacy selectedMicrophone setting if priority list is empty
     if (result.selectedMicrophone && settings.audioDevicePriority.length === 0) {
       settings.audioDevicePriority = [{
-        deviceId: result.selectedMicrophone,
+        deviceId: /** @type {string} */ (result.selectedMicrophone),
         label: 'Migrated Device',
         lastSeen: Date.now()
       }];
     }
 
     settings.soundFeedbackEnabled = result.soundFeedbackEnabled !== false;
-    settings.audioVolume = result.audioVolume !== undefined ? result.audioVolume : 0.5;
+    settings.audioVolume = typeof result.audioVolume === 'number' ? result.audioVolume : 0.5;
   } catch (err) {
     console.error('Utter Recognition Frame: Error loading settings:', err);
   }
@@ -400,3 +422,5 @@ window.addEventListener('beforeunload', () => {
 });
 
 console.log('Utter Recognition Frame: Loaded');
+
+})();

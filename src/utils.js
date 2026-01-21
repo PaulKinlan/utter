@@ -1,10 +1,19 @@
-// @ts-nocheck
 // Shared utility functions for Utter extension
+
+/**
+ * @typedef {Object} KeyCombo
+ * @property {boolean} ctrlKey - Whether Ctrl key is required
+ * @property {boolean} shiftKey - Whether Shift key is required
+ * @property {boolean} altKey - Whether Alt key is required
+ * @property {boolean} metaKey - Whether Meta (Cmd/Win) key is required
+ * @property {string} key - The main key (e.g., 'u', ' ', '.')
+ * @property {string} code - The key code (e.g., 'KeyU', 'Space')
+ */
 
 /**
  * Check if a keyboard event matches a key combo configuration
  * @param {KeyboardEvent} event - The keyboard event
- * @param {Object} combo - The combo configuration with ctrlKey, shiftKey, altKey, metaKey, key, code
+ * @param {KeyCombo} combo - The combo configuration
  * @returns {boolean}
  */
 export function matchesCombo(event, combo) {
@@ -20,7 +29,7 @@ export function matchesCombo(event, combo) {
 /**
  * Check if a key release is part of a combo (any modifier or the main key)
  * @param {KeyboardEvent} event - The keyboard event
- * @param {Object} combo - The combo configuration
+ * @param {KeyCombo} combo - The combo configuration
  * @returns {boolean}
  */
 export function isPartOfCombo(event, combo) {
@@ -44,7 +53,7 @@ export function isTextInputType(type) {
 
 /**
  * Format a key combo object into a human-readable string
- * @param {Object} combo - The combo configuration
+ * @param {KeyCombo} combo - The combo configuration
  * @param {boolean} [isMac] - Whether the platform is Mac (auto-detected if not provided)
  * @returns {string}
  */
@@ -127,9 +136,10 @@ export function generateId() {
 
 /**
  * Trim history array to maximum size
- * @param {Array} history - The history array
+ * @template T
+ * @param {T[]} history - The history array
  * @param {number} [maxSize=500] - Maximum number of items to keep
- * @returns {Array}
+ * @returns {T[]}
  */
 export function trimHistory(history, maxSize = 500) {
   return history.slice(-maxSize);
@@ -164,16 +174,17 @@ export function insertText(element, text) {
       }
       return true;
     } else if ('value' in element) {
-      // For input/textarea elements
-      const start = element.selectionStart ?? element.value?.length ?? 0;
-      const end = element.selectionEnd ?? element.value?.length ?? 0;
-      const value = element.value || '';
+      // For input/textarea elements - cast to HTMLInputElement for proper typing
+      const inputEl = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (element);
+      const start = inputEl.selectionStart ?? inputEl.value?.length ?? 0;
+      const end = inputEl.selectionEnd ?? inputEl.value?.length ?? 0;
+      const value = inputEl.value || '';
 
-      element.value = value.substring(0, start) + text + value.substring(end);
-      element.selectionStart = element.selectionEnd = start + text.length;
+      inputEl.value = value.substring(0, start) + text + value.substring(end);
+      inputEl.selectionStart = inputEl.selectionEnd = start + text.length;
 
-      element.dispatchEvent(new Event('input', { bubbles: true }));
-      element.dispatchEvent(new Event('change', { bubbles: true }));
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+      inputEl.dispatchEvent(new Event('change', { bubbles: true }));
       return true;
     }
 

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Push-to-talk listener - runs on all pages
 // Listens for configured key combo to start/stop speech recognition
 // Uses an iframe to run speech recognition directly (no sidepanel needed)
@@ -7,12 +6,40 @@
   const INDICATOR_ID = 'utter-listening-indicator';
   const IFRAME_ID = 'utter-recognition-frame';
 
+  /**
+   * @typedef {Object} KeyCombo
+   * @property {boolean} ctrlKey
+   * @property {boolean} shiftKey
+   * @property {boolean} altKey
+   * @property {boolean} metaKey
+   * @property {string} key
+   * @property {string} code
+   */
+
+  /**
+   * @typedef {Object} CustomRefinementPrompt
+   * @property {string} id
+   * @property {string} name
+   * @property {string} prompt
+   * @property {KeyCombo} [hotkey]
+   */
+
+  /**
+   * @typedef {Object} Settings
+   * @property {string} activationMode
+   * @property {KeyCombo | null} pttKeyCombo
+   * @property {boolean} refinementEnabled
+   * @property {Object<string, KeyCombo>} refinementHotkeys
+   * @property {CustomRefinementPrompt[]} customRefinementPrompts
+   */
+
+  /** @type {Settings} */
   let settings = {
     activationMode: 'toggle',
     pttKeyCombo: null,
     refinementEnabled: true,
-    refinementHotkeys: {},           // Per-style hotkeys: { promptId: keyCombo }
-    customRefinementPrompts: []      // Custom prompts with embedded hotkeys
+    refinementHotkeys: {},
+    customRefinementPrompts: []
   };
 
   let isKeyHeld = false;
@@ -36,19 +63,24 @@
   chrome.storage.onChanged.addListener((changes) => {
     if (!isContextValid()) return;
     if (changes.activationMode) {
-      settings.activationMode = changes.activationMode.newValue;
+      settings.activationMode = /** @type {string} */ (changes.activationMode.newValue) || 'toggle';
     }
     if (changes.pttKeyCombo) {
-      settings.pttKeyCombo = changes.pttKeyCombo.newValue;
+      settings.pttKeyCombo = /** @type {KeyCombo | null} */ (changes.pttKeyCombo.newValue);
     }
     if (changes.refinementEnabled) {
-      settings.refinementEnabled = changes.refinementEnabled.newValue;
+      settings.refinementEnabled = /** @type {boolean} */ (changes.refinementEnabled.newValue) !== false;
     }
     if (changes.refinementHotkeys) {
-      settings.refinementHotkeys = changes.refinementHotkeys.newValue || {};
+      const newHotkeys = changes.refinementHotkeys.newValue;
+      settings.refinementHotkeys = (newHotkeys && typeof newHotkeys === 'object' && !Array.isArray(newHotkeys))
+        ? /** @type {Object<string, KeyCombo>} */ (newHotkeys)
+        : {};
     }
     if (changes.customRefinementPrompts) {
-      settings.customRefinementPrompts = changes.customRefinementPrompts.newValue || [];
+      settings.customRefinementPrompts = Array.isArray(changes.customRefinementPrompts.newValue)
+        ? /** @type {CustomRefinementPrompt[]} */ (changes.customRefinementPrompts.newValue)
+        : [];
     }
   });
 
@@ -62,13 +94,18 @@
         'refinementHotkeys',
         'customRefinementPrompts'
       ]);
-      settings.activationMode = result.activationMode || 'toggle';
-      settings.pttKeyCombo = result.pttKeyCombo || null;
+      settings.activationMode = typeof result.activationMode === 'string' ? result.activationMode : 'toggle';
+      settings.pttKeyCombo = /** @type {KeyCombo | null} */ (result.pttKeyCombo) || null;
       settings.refinementEnabled = result.refinementEnabled !== false;
-      settings.refinementHotkeys = result.refinementHotkeys || {};
-      settings.customRefinementPrompts = result.customRefinementPrompts || [];
+      const hotkeys = result.refinementHotkeys;
+      settings.refinementHotkeys = (hotkeys && typeof hotkeys === 'object' && !Array.isArray(hotkeys))
+        ? /** @type {Object<string, KeyCombo>} */ (hotkeys)
+        : {};
+      settings.customRefinementPrompts = Array.isArray(result.customRefinementPrompts)
+        ? /** @type {CustomRefinementPrompt[]} */ (result.customRefinementPrompts)
+        : [];
     } catch (err) {
-      if (err.message?.includes('Extension context invalidated')) {
+      if (/** @type {Error} */ (err).message?.includes('Extension context invalidated')) {
         contextInvalidated = true;
         return;
       }
@@ -157,7 +194,8 @@
       } else {
         // Get custom prompt and send to service worker
         const result = await chrome.storage.local.get(['customRefinementPrompts']);
-        const customPrompts = result.customRefinementPrompts || [];
+        /** @type {CustomRefinementPrompt[]} */
+        const customPrompts = Array.isArray(result.customRefinementPrompts) ? result.customRefinementPrompts : [];
         const customPrompt = customPrompts.find(p => p.id === promptId);
 
         if (customPrompt) {
@@ -196,12 +234,30 @@
     }
   }
 
+  /**
+   * @typedef {Object} HistoryEntry
+   * @property {string} id
+   * @property {string} text
+   * @property {string} [refinedText]
+   * @property {number} timestamp
+   * @property {string} url
+   * @property {string} [audioDataUrl]
+   */
+
+  /**
+   * Save transcription to history with refinement
+   * @param {string} originalText
+   * @param {string} refinedText
+   * @param {string | null} audioDataUrl
+   */
   async function saveToHistoryWithRefinement(originalText, refinedText, audioDataUrl) {
     if (!isContextValid()) return;
     try {
       const result = await chrome.storage.local.get(['utterHistory']);
-      const history = result.utterHistory || [];
+      /** @type {HistoryEntry[]} */
+      const history = Array.isArray(result.utterHistory) ? result.utterHistory : [];
 
+      /** @type {HistoryEntry} */
       const entry = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         text: originalText,
@@ -363,10 +419,18 @@
       return;
     }
 
-    const targetElement = document.activeElement;
+    /** @type {HTMLElement | null} */
+    const targetElement = /** @type {HTMLElement | null} */ (document.activeElement);
 
+    if (!targetElement) {
+      showIndicator('Focus on a text field first', true);
+      isKeyHeld = false;
+      return;
+    }
+
+    const inputElement = /** @type {HTMLInputElement} */ (targetElement);
     const isTextInput =
-      (targetElement.tagName === 'INPUT' && isTextInputType(targetElement.type)) ||
+      (targetElement.tagName === 'INPUT' && isTextInputType(inputElement.type)) ||
       targetElement.tagName === 'TEXTAREA' ||
       targetElement.isContentEditable;
 
@@ -559,9 +623,18 @@
       return;
     }
 
-    const targetElement = document.activeElement;
+    /** @type {HTMLElement | null} */
+    const targetElement = /** @type {HTMLElement | null} */ (document.activeElement);
+
+    if (!targetElement) {
+      showIndicator('Focus on a text field first', true);
+      isRefinementKeyHeld = false;
+      return;
+    }
+
+    const inputElement = /** @type {HTMLInputElement} */ (targetElement);
     const isTextInput =
-      (targetElement.tagName === 'INPUT' && isTextInputType(targetElement.type)) ||
+      (targetElement.tagName === 'INPUT' && isTextInputType(inputElement.type)) ||
       targetElement.tagName === 'TEXTAREA' ||
       targetElement.isContentEditable;
 
@@ -595,12 +668,19 @@
     }, 100);
   }
 
+  /**
+   * Save transcription to history
+   * @param {string} text
+   * @param {string | null} [audioDataUrl=null]
+   */
   async function saveToHistory(text, audioDataUrl = null) {
     if (!isContextValid()) return;
     try {
       const result = await chrome.storage.local.get(['utterHistory']);
-      const history = result.utterHistory || [];
+      /** @type {HistoryEntry[]} */
+      const history = Array.isArray(result.utterHistory) ? result.utterHistory : [];
 
+      /** @type {HistoryEntry} */
       const entry = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         text: text,

@@ -1,4 +1,3 @@
-// @ts-nocheck
 // Text refinement service using Chrome Prompt API (Gemini Nano)
 // API Reference: https://developer.chrome.com/docs/ai/prompt-api
 // Uses window.LanguageModel API
@@ -131,8 +130,11 @@ export async function ensureModelReady(onStatusChange = null) {
     // instead of polling, which prevents UI blocking
     onStatusChange?.({ status: 'downloading', message: 'Downloading model... 0%' });
 
+    /** @type {LanguageModelSession | null} */
     let session = null;
+    /** @type {LanguageModelDownloadMonitor | null} */
     let monitorRef = null;
+    /** @type {((e: LanguageModelDownloadProgressEvent) => void) | null} */
     let progressHandler = null;
 
     try {
@@ -176,6 +178,10 @@ export async function ensureModelReady(onStatusChange = null) {
 
 /**
  * Refine text using a preset prompt
+ * @param {string} text - The text to refine
+ * @param {string} presetId - The ID of the preset prompt to use
+ * @param {((progress: string) => void) | null} [onProgress=null] - Optional callback for streaming progress
+ * @returns {Promise<string>} The refined text
  */
 export async function refineWithPreset(text, presetId, onProgress = null) {
   const preset = PRESET_PROMPTS[presetId];
@@ -188,6 +194,10 @@ export async function refineWithPreset(text, presetId, onProgress = null) {
 
 /**
  * Refine text using a custom prompt
+ * @param {string} text - The text to refine
+ * @param {string} customPrompt - The custom prompt instructions
+ * @param {((progress: string) => void) | null} [onProgress=null] - Optional callback for streaming progress
+ * @returns {Promise<string>} The refined text
  */
 export async function refineWithCustomPrompt(text, customPrompt, onProgress = null) {
   const systemPrompt = `You are a text refinement assistant. ${customPrompt}\n\nReturn only the refined text without any additional commentary.`;
@@ -196,6 +206,10 @@ export async function refineWithCustomPrompt(text, customPrompt, onProgress = nu
 
 /**
  * Core refinement function
+ * @param {string} text - The text to refine
+ * @param {string} systemPrompt - The system prompt with refinement instructions
+ * @param {((progress: string) => void) | null} [onProgress=null] - Optional callback for streaming progress
+ * @returns {Promise<string>} The refined text
  */
 async function refineText(text, systemPrompt, onProgress = null) {
   let session = null;
@@ -232,12 +246,26 @@ async function refineText(text, systemPrompt, onProgress = null) {
 }
 
 /**
+ * @typedef {Object} RefinementPrompt
+ * @property {string} id - Unique identifier for the prompt
+ * @property {string} name - Display name
+ * @property {string} [description] - Optional description
+ * @property {string} [systemPrompt] - System prompt text (for presets)
+ * @property {string} [prompt] - Custom prompt text (for custom prompts)
+ * @property {Object} [hotkey] - Optional hotkey configuration
+ */
+
+/**
  * Get all available prompts (presets + custom)
+ * @returns {Promise<{presets: RefinementPrompt[], custom: RefinementPrompt[]}>}
  */
 export async function getAvailablePrompts() {
   try {
     const result = await chrome.storage.local.get(['customRefinementPrompts']);
-    const customPrompts = result.customRefinementPrompts || [];
+    /** @type {RefinementPrompt[]} */
+    const customPrompts = Array.isArray(result.customRefinementPrompts)
+      ? result.customRefinementPrompts
+      : [];
 
     return {
       presets: Object.values(PRESET_PROMPTS),
