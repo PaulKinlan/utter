@@ -8,11 +8,49 @@
   const IFRAME_ID = 'utter-recognition-frame';
   const IFRAME_STARTUP_TIMEOUT = 3000; // 3 seconds to detect iframe failure
   const PERMISSION_ERRORS = ['not-allowed', 'permission-denied', 'permission-dismissed'];
+  const FAILED_ORIGINS_KEY = 'utterFailedOrigins';
 
   // Track if we're using sidepanel fallback
   let usingSidepanelFallback = false;
   let sidepanelSessionId = null;
   let iframeStartupTimer = null;
+
+  /**
+   * Check if the current origin is known to have permission issues
+   * @returns {Promise<boolean>}
+   */
+  async function isOriginKnownToFail() {
+    try {
+      const result = await chrome.storage.local.get([FAILED_ORIGINS_KEY]);
+      /** @type {string[]} */
+      const failedOrigins = Array.isArray(result[FAILED_ORIGINS_KEY]) ? result[FAILED_ORIGINS_KEY] : [];
+      return failedOrigins.includes(window.location.origin);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Mark the current origin as having permission issues
+   */
+  async function markOriginAsFailed() {
+    try {
+      const result = await chrome.storage.local.get([FAILED_ORIGINS_KEY]);
+      /** @type {string[]} */
+      const failedOrigins = Array.isArray(result[FAILED_ORIGINS_KEY]) ? result[FAILED_ORIGINS_KEY] : [];
+      const origin = window.location.origin;
+
+      if (!failedOrigins.includes(origin)) {
+        failedOrigins.push(origin);
+        // Keep only the last 100 failed origins to avoid unbounded growth
+        const trimmed = failedOrigins.slice(-100);
+        await chrome.storage.local.set({ [FAILED_ORIGINS_KEY]: trimmed });
+        console.log('Utter PTT: Marked origin as failed:', origin);
+      }
+    } catch (err) {
+      console.error('Utter PTT: Error marking origin as failed:', err);
+    }
+  }
 
   /**
    * @typedef {Object} KeyCombo
@@ -170,6 +208,8 @@
           // Check if this is a permission error that we should fallback for
           if (!usingSidepanelFallback && PERMISSION_ERRORS.includes(message.error)) {
             console.log('Utter PTT: Permission error in iframe, trying sidepanel fallback');
+            // Remember this origin fails so we skip iframe next time
+            markOriginAsFailed();
             removeRecognitionFrame();
             startSidepanelRecognition();
             return;
@@ -493,9 +533,17 @@
     window.__utterTargetElement = targetElement;
     window.__utterSessionText = ''; // Accumulate all text from this session
 
-    // Create iframe for speech recognition (iframe shows its own "Starting..." state)
-    // This happens directly in response to keydown (user gesture)
-    createRecognitionFrame();
+    // Check if this origin is known to have permission issues
+    // If so, skip the iframe and go directly to sidepanel
+    const originKnownToFail = await isOriginKnownToFail();
+    if (originKnownToFail) {
+      console.log('Utter PTT: Origin known to fail, using sidepanel directly');
+      startSidepanelRecognition(true);
+    } else {
+      // Create iframe for speech recognition (iframe shows its own "Starting..." state)
+      // This happens directly in response to keydown (user gesture)
+      createRecognitionFrame();
+    }
   }
 
   function createRecognitionFrame() {
@@ -550,12 +598,17 @@
 
   /**
    * Start recognition using sidepanel (fallback mode)
+   * @param {boolean} [knownFailure=false] - True if we already knew this origin would fail
    */
-  async function startSidepanelRecognition() {
+  async function startSidepanelRecognition(knownFailure = false) {
     if (usingSidepanelFallback) return; // Already using fallback
 
     usingSidepanelFallback = true;
-    showIndicator('Opening sidepanel...');
+    // Show a brief message explaining we're using the sidepanel
+    const message = knownFailure
+      ? 'Using sidepanel (page blocks microphone)'
+      : 'Mic blocked - opening sidepanel...';
+    showIndicator(message);
 
     try {
       sidepanelSessionId = Date.now().toString();
@@ -763,8 +816,16 @@
     window.__utterSessionText = '';
     isRefinementRecording = true;
 
-    // Create iframe for speech recognition
-    createRecognitionFrame();
+    // Check if this origin is known to have permission issues
+    // If so, skip the iframe and go directly to sidepanel
+    const originKnownToFail = await isOriginKnownToFail();
+    if (originKnownToFail) {
+      console.log('Utter PTT: Origin known to fail, using sidepanel directly for refinement');
+      startSidepanelRecognition(true);
+    } else {
+      // Create iframe for speech recognition
+      createRecognitionFrame();
+    }
   }
 
   function stopRefinementRecording() {
