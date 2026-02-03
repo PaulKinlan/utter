@@ -23,7 +23,7 @@
     "@types/chrome": "^0.1.36",
     "eslint": "^9.0.0",
     "jsdom": "^27.4.0",
-    "puppeteer-core": "^24.35.0",
+    "puppeteer-core": "^24.36.1",
     "sharp": "^0.34.5",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
